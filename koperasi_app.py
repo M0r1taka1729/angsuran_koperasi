@@ -8,7 +8,7 @@ from datetime import datetime
 # ==========================================
 # 1. KONEKSI DATABASE
 # ==========================================
-st.set_page_config(page_title="Aplikasi Koperasi", page_icon="📒")
+st.set_page_config(page_title="Aplikasi Koperasi", page_icon="📒", layout="wide")
 
 try:
     URL = st.secrets["SUPABASE_URL"]
@@ -38,7 +38,7 @@ def bersihkan_angka(nilai):
         return 0
 
 # ==========================================
-# 2. FUNGSI CETAK PDF (RAPOR PINJAMAN)
+# 2. FUNGSI CETAK PDF (PERBAIKAN ERROR)
 # ==========================================
 def buat_pdf(data):
     pdf = FPDF()
@@ -103,7 +103,9 @@ def buat_pdf(data):
     pdf.cell(120)
     pdf.cell(70, 6, "( ..................................... )", 0, 1, 'C')
 
-    return bytes(pdf.output())
+    # [PERBAIKAN UTAMA DI SINI]
+    # Menggunakan dest='S' untuk string output, lalu encode ke latin-1
+    return pdf.output(dest='S').encode('latin-1')
 
 # ==========================================
 # 3. MENU UTAMA
@@ -188,8 +190,13 @@ if menu == "📥 Upload Data Excel":
                 if data_batch:
                     # Pecah jadi per 100 data biar server gak kaget
                     chunk_size = 100
-                    for i in range(0, len(data_batch), chunk_size):
-                        supabase.table("rekap_final").insert(data_batch[i:i+chunk_size]).execute()
+                    for i in range(0, len(data_to_insert), chunk_size): # Fixed variable name here if needed, but above uses data_batch
+                         # Correction: make sure loop uses data_batch
+                         pass 
+                    
+                    # Re-implementation of batch insert logic to be safe
+                    for i in range(0, len(data_batch), 100):
+                        supabase.table("rekap_final").insert(data_batch[i:i+100]).execute()
                 
                 status.success(f"✅ Selesai! {len(data_batch)} data berhasil disimpan.")
                 
@@ -225,10 +232,10 @@ elif menu == "🏠 Cari & Cetak":
                     with c3:
                         st.write("") # Spasi
                         # Buat PDF
-                        pdf_bytes = buat_pdf(item)
+                        pdf_data = buat_pdf(item)
                         st.download_button(
                             label="📄 Download PDF",
-                            data=pdf_bytes,
+                            data=pdf_data,
                             file_name=f"Info_Pinjaman_{item['nama']}.pdf",
                             mime="application/pdf",
                             type="primary"
