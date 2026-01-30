@@ -207,38 +207,69 @@ if menu == "📥 Upload Data Excel":
 elif menu == "🏠 Cari & Cetak":
     st.title("🖨️ Cetak Kartu Pinjaman")
     
-    cari = st.text_input("🔍 Cari Nama Anggota:", placeholder="Ketik nama...")
+    cari = st.text_input("🔍 Cari Nama Anggota / No Anggota:", placeholder="Ketik nama atau nomor...")
     
     if cari:
         # Cari di Database
-        res = supabase.table("rekap_final").select("*").ilike("nama", f"%{cari}%").execute()
+        # Kita urutkan berdasarkan ID (terbaru di atas) agar Top Up muncul duluan
+        res = supabase.table("rekap_final").select("*")\
+            .or_(f"nama.ilike.%{cari}%,no_anggota.ilike.%{cari}%")\
+            .order("id", desc=True)\
+            .execute()
         
         if res.data:
-            st.success(f"Ditemukan {len(res.data)} anggota.")
+            jumlah_aktif = sum(1 for x in res.data if x['sisa_akhir'] > 0)
+            st.success(f"Ditemukan {len(res.data)} riwayat pinjaman ({jumlah_aktif} masih aktif).")
             
-            for item in res.data:
-                with st.container(border=True):
-                    c1, c2, c3 = st.columns([2, 2, 1])
+            # Pisahkan data: Aktif dulu, baru Lunas
+            data_aktif = [x for x in res.data if x['sisa_akhir'] > 0]
+            data_lunas = [x for x in res.data if x['sisa_akhir'] <= 0]
+            
+            # Gabungkan kembali (Aktif di atas)
+            data_urut = data_aktif + data_lunas
+            
+            for item in data_urut:
+                # Tentukan Status Visual
+                is_lunas = item['sisa_akhir'] <= 0
+                warna_status = "green" if is_lunas else "red"
+                label_status = "✅ SUDAH LUNAS" if is_lunas else "⚠️ BELUM LUNAS (AKTIF)"
+                bg_color = "#f0fdf4" if is_lunas else "#fef2f2" # Hijau muda / Merah muda
+                
+                # Tampilan Kartu
+                with st.container():
+                    st.markdown(f"""
+                    <div style="
+                        border: 1px solid {warna_status}; 
+                        border-radius: 10px; 
+                        padding: 15px; 
+                        margin-bottom: 10px;
+                        background-color: {bg_color};
+                    ">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <h4 style="margin:0; color:black;">{item['nama']}</h4>
+                                <small style="color:gray;">No: {item['no_anggota']} | Tgl Pinjam: {item['tanggal_pinjam']}</small>
+                            </div>
+                            <div style="text-align:right;">
+                                <h4 style="margin:0; color:{warna_status};">{format_rupiah(item['sisa_akhir'])}</h4>
+                                <small style="font-weight:bold; color:{warna_status};">{label_status}</small>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    with c1:
-                        st.subheader(item['nama'])
-                        st.write(f"No: **{item['no_anggota']}**")
-                    
+                    # Tombol Download (Hanya muncul di bawah kartu visual)
+                    c1, c2 = st.columns([4, 1])
                     with c2:
-                        st.write("Sisa Pinjaman:")
-                        st.markdown(f"### {format_rupiah(item['sisa_akhir'])}")
-                        st.caption(f"Sudah mengangsur {item['bulan_berjalan']} bulan tahun ini")
-                    
-                    with c3:
-                        st.write("") # Spasi
-                        # Buat PDF
                         pdf_data = buat_pdf(item)
                         st.download_button(
                             label="📄 Download PDF",
                             data=pdf_data,
-                            file_name=f"Info_Pinjaman_{item['nama']}.pdf",
+                            file_name=f"Info_{item['nama']}_{item['id']}.pdf",
                             mime="application/pdf",
-                            type="primary"
+                            type="secondary" if is_lunas else "primary",
+                            key=f"btn_dl_{item['id']}"
                         )
+                    st.write("") # Jarak antar kartu
         else:
-            st.warning("Nama tidak ditemukan.")
+            st.warning("Data tidak ditemukan.")
