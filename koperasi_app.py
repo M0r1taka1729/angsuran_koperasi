@@ -335,11 +335,6 @@ elif menu == "📥 Import Data Excel":
                                 tgl = pd.to_datetime(row['Tanggal Pinjaman']).date().isoformat()
                             except: pass
 
-                        nilai_saldo_awal = 0
-                        val_lalu = row.get('sebelum th 2026', 0)
-                        if pd.notnull(val_lalu) and isinstance(val_lalu, (int, float)):
-                            nilai_saldo_awal = float(val_lalu)
-    
                         # Insert ke Supabase
                         supabase.table("pinjaman").insert({
                             "anggota_id": member_id,
