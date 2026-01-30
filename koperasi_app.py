@@ -54,7 +54,7 @@ def buat_pdf_tagihan(df, judul_laporan):
     pdf.ln(10)
     
     # HEADER
-    pdf.set_font("Arial", 'B', 9)
+    pdf.set_font("Arial", 'B', 8)
     pdf.set_fill_color(220, 230, 240)
     
     w_no=10; w_nama=60; w_wajib=35; w_pokok=35; w_jasa=35; w_total=50
@@ -67,7 +67,7 @@ def buat_pdf_tagihan(df, judul_laporan):
     pdf.cell(w_total, 10, "TOTAL TAGIHAN", 1, 1, 'C', True)
     
     # ISI
-    pdf.set_font("Arial", size=9)
+    pdf.set_font("Arial", size=8)
     no = 1
     total_all = 0
     
