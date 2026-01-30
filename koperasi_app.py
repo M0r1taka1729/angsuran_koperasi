@@ -3,7 +3,7 @@ from supabase import create_client
 import pandas as pd
 from fpdf import FPDF
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ==========================================
 # 1. KONEKSI DATABASE
@@ -23,15 +23,30 @@ def format_rupiah(angka):
     return f"Rp {angka:,.0f}".replace(",", ".")
 
 def bersihkan_angka(nilai):
-    if pd.isna(nilai) or str(nilai).strip() in ['', 'nan', 'Nan', '#N/A', '-']:
-        return 0
-    if isinstance(nilai, (int, float)):
-        return float(nilai)
+    if pd.isna(nilai) or str(nilai).strip() in ['', 'nan', 'Nan', '#N/A', '-']: return 0
+    if isinstance(nilai, (int, float)): return float(nilai)
     str_val = str(nilai).replace('Rp', '').replace('.', '').replace(' ', '').replace(',', '.')
+    try: return float(str_val)
+    except: return 0
+
+# --- FUNGSI PINTAR: UBAH TANGGAL EXCEL (46050 -> 2026) ---
+def normalisasi_tanggal(nilai):
+    if pd.isna(nilai) or str(nilai).strip() in ['-', '']:
+        return datetime.now().date(), 2026 # Default hari ini
+    
     try:
-        return float(str_val)
+        # Cek jika formatnya angka Excel (misal: 46050)
+        if isinstance(nilai, (int, float)) or (isinstance(nilai, str) and nilai.isdigit()):
+            serial = float(nilai)
+            # Rumus konversi angka excel ke python date
+            tgl = datetime(1899, 12, 30) + timedelta(days=serial)
+            return tgl.date(), tgl.year
+        
+        # Cek jika formatnya string tanggal (2026-01-20)
+        tgl = pd.to_datetime(nilai).date()
+        return tgl, tgl.year
     except:
-        return 0
+        return datetime.now().date(), 2026
 
 # ==========================================
 # 2. FUNGSI CETAK PDF
@@ -40,13 +55,10 @@ def buat_pdf(data):
     pdf = FPDF()
     pdf.add_page()
     
-    # KOP SURAT
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, "KOPERASI SIMPAN PINJAM", ln=True, align='C')
-    pdf.set_font("Arial", size=10)
-    pdf.cell(0, 10, "Laporan Status Sisa Pinjaman Anggota", ln=True, align='C')
-    pdf.line(10, 25, 200, 25)
-    pdf.ln(10)
+    # KOP
+    pdf.set_font("Arial", 'B', 16); pdf.cell(0, 10, "KOPERASI SIMPAN PINJAM", ln=True, align='C')
+    pdf.set_font("Arial", size=10); pdf.cell(0, 10, "Laporan Status Sisa Pinjaman Anggota", ln=True, align='C')
+    pdf.line(10, 25, 200, 25); pdf.ln(10)
     
     # INFO
     pdf.set_font("Arial", size=11)
@@ -64,9 +76,8 @@ def buat_pdf(data):
     pdf.cell(110, 10, "KETERANGAN", 1, 0, 'C', True); pdf.cell(80, 10, "NOMINAL", 1, 1, 'C', True)
     pdf.set_font("Arial", size=11)
     
-    label_saldo = "Saldo Awal (Pinjaman Baru / Sisa Lama)"
-    pdf.cell(110, 10, label_saldo, 1); pdf.cell(80, 10, format_rupiah(data['saldo_awal_tahun']), 1, 1, 'R')
-    
+    pdf.cell(110, 10, "Saldo Awal (Pinjaman Baru / Sisa Lama)", 1)
+    pdf.cell(80, 10, format_rupiah(data['saldo_awal_tahun']), 1, 1, 'R')
     pdf.cell(110, 10, f"Total Angsuran Tahun Ini ({data['bulan_berjalan']} Bulan)", 1)
     pdf.cell(80, 10, format_rupiah(data['total_angsuran_tahun_ini']), 1, 1, 'R')
     
@@ -78,8 +89,7 @@ def buat_pdf(data):
     pdf.ln(15); pdf.set_font("Arial", size=10)
     pdf.cell(120); pdf.cell(70, 6, "Dicetak: " + datetime.now().strftime("%d-%m-%Y"), 0, 1, 'C')
     pdf.cell(120); pdf.cell(70, 6, "Bendahara,", 0, 1, 'C')
-    pdf.ln(20)
-    pdf.cell(120); pdf.cell(70, 6, "( ..................................... )", 0, 1, 'C')
+    pdf.ln(20); pdf.cell(120); pdf.cell(70, 6, "( ..................................... )", 0, 1, 'C')
 
     return pdf.output(dest='S').encode('latin-1')
 
@@ -90,24 +100,23 @@ menu = st.sidebar.radio("Menu", ["🏠 Cari & Cetak", "📥 Upload Data Excel"])
 
 if menu == "📥 Upload Data Excel":
     st.title("📥 Upload Data Excel")
-    st.info("Logika Perbaikan: Sel Kosong = Pinjaman Baru (Ambil Plafon). Angka 0 = Lunas.")
+    st.info("Logika Baru: Jika Tahun Pinjam >= 2026, sistem otomatis memakai PLAFON sebagai Saldo Awal.")
     
     uploaded_file = st.file_uploader("Pilih File Excel (.xlsx)", type=['xlsx'])
     
     if uploaded_file:
         try:
             df = pd.read_excel(uploaded_file)
-            
-            # Normalisasi nama kolom
             df.columns = [c.strip() for c in df.columns]
             
-            def cari_kolom(keyword_list):
-                for col in df.columns:
-                    if col.lower() in [k.lower() for k in keyword_list]: return col
+            def cari_kolom(kunci):
+                for c in df.columns:
+                    if c.lower() in [k.lower() for k in kunci]: return c
                 return None
 
             col_plafon = cari_kolom(['Plafon', 'jumlah pinjaman'])
             col_sebelum = cari_kolom(['Sebelum th 2026', 'sebelum'])
+            col_tgl = cari_kolom(['Tanggal Pinjaman', 'tgl'])
             
             preview_list = []
             kolom_bulan = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des']
@@ -115,26 +124,26 @@ if menu == "📥 Upload Data Excel":
             for index, row in df.iterrows():
                 try:
                     nama = str(row.get('Nama', 'Tanpa Nama'))
-                    no_anggota = str(row.get('No. Anggota', '-'))
-                    tgl = str(row.get('Tanggal Pinjaman', '-'))
+                    no_agg = str(row.get('No. Anggota', '-'))
+                    
+                    # 1. CEK TANGGAL (PENTING!)
+                    raw_tgl = row.get(col_tgl)
+                    obj_tgl, tahun_pinjam = normalisasi_tanggal(raw_tgl)
+                    str_tgl = obj_tgl.strftime("%d-%m-%Y") # Format jadi cantik
+                    
                     plafon = bersihkan_angka(row.get(col_plafon, 0))
+                    val_sebelum = bersihkan_angka(row.get(col_sebelum, 0))
                     
                     # ====================================================
-                    # 🔥 LOGIKA KUNCI: MEMBEDAKAN 0 DAN KOSONG 🔥
+                    # 🔥 LOGIKA SAKTI: BEDAKAN LAMA VS BARU BY TAHUN
                     # ====================================================
-                    raw_sebelum = row.get(col_sebelum)
-                    
-                    # Cek apakah sel benar-benar KOSONG / NaN
-                    is_blank = pd.isna(raw_sebelum) or str(raw_sebelum).strip() == ""
-                    
-                    if is_blank:
-                        # JIKA KOSONG -> BERARTI PINJAMAN BARU -> PAKAI PLAFON
+                    if tahun_pinjam >= 2026:
+                        # Jika Pinjaman Tahun 2026 (Baru) -> Pakai Plafon
                         saldo_basis = plafon
-                        ket = "Pinjaman Baru (Data Kosong)"
+                        ket = "Pinjaman Baru 2026"
                     else:
-                        # JIKA ADA ISI (Termasuk angka 0) -> BERARTI DATA LAMA
-                        val_angka = bersihkan_angka(raw_sebelum)
-                        saldo_basis = val_angka
+                        # Jika Pinjaman Lama (< 2026) -> Pakai kolom Sisa Excel
+                        saldo_basis = val_sebelum
                         ket = "Sisa Lama"
                     # ====================================================
                     
@@ -142,9 +151,9 @@ if menu == "📥 Upload Data Excel":
                     total_angsuran = 0
                     bulan_jalan = 0
                     for bln in kolom_bulan:
-                        found_col = cari_kolom([bln])
-                        if found_col:
-                            bayar = bersihkan_angka(row[found_col])
+                        found = cari_kolom([bln])
+                        if found:
+                            bayar = bersihkan_angka(row[found])
                             if bayar > 0:
                                 total_angsuran += bayar
                                 bulan_jalan += 1
@@ -153,10 +162,8 @@ if menu == "📥 Upload Data Excel":
                     if sisa < 0: sisa = 0
 
                     preview_list.append({
-                        "no_anggota": no_anggota,
-                        "nama": nama,
-                        "plafon": plafon,
-                        "tanggal_pinjam": tgl,
+                        "no_anggota": no_agg, "nama": nama, "plafon": plafon,
+                        "tanggal_pinjam": str_tgl,
                         "saldo_awal_tahun": saldo_basis,
                         "total_angsuran_tahun_ini": total_angsuran,
                         "sisa_akhir": sisa,
@@ -165,52 +172,48 @@ if menu == "📥 Upload Data Excel":
                     })
                 except Exception: pass
 
-            st.subheader("🧐 Cek Tabel Dulu (PENTING!)")
-            st.warning("Pastikan baris Pinjaman Baru angkanya masuk (Sesuai Plafon), bukan 0.")
+            st.subheader("🧐 Cek Hasil Deteksi")
+            st.warning("Perhatikan kolom **Keterangan**. Farhan yang baru harusnya 'Pinjaman Baru 2026'.")
             
-            df_preview = pd.DataFrame(preview_list)
-            st.dataframe(df_preview[['nama', 'plafon', 'saldo_awal_tahun', 'sisa_akhir', 'keterangan']])
+            df_prev = pd.DataFrame(preview_list)
+            st.dataframe(df_prev[['nama', 'tanggal_pinjam', 'plafon', 'sisa_akhir', 'keterangan']])
             
             if st.button("✅ Data Benar, Simpan!"):
                 progress_bar = st.progress(0)
                 supabase.table("rekap_final").delete().neq("id", 0).execute()
                 
-                chunk_size = 100
-                data_save = df_preview.drop(columns=['keterangan']).to_dict('records')
-                
-                for i in range(0, len(data_save), chunk_size):
-                    supabase.table("rekap_final").insert(data_save[i:i+chunk_size]).execute()
+                chunk = 100
+                data_save = df_prev.drop(columns=['keterangan']).to_dict('records')
+                for i in range(0, len(data_save), chunk):
+                    supabase.table("rekap_final").insert(data_save[i:i+chunk]).execute()
                     
                 st.success(f"Sukses! {len(data_save)} data tersimpan.")
                 st.balloons()
                 
-        except Exception as e:
-            st.error(f"Error: {e}")
+        except Exception as e: st.error(f"Error: {e}")
 
 elif menu == "🏠 Cari & Cetak":
     st.title("🖨️ Cetak Kartu Pinjaman")
     cari = st.text_input("🔍 Cari Nama:", placeholder="Ketik nama...")
     
     if cari:
-        # Urutkan ID desc agar data Top Up muncul paling atas
+        # Urutkan ID desc agar yang baru diatas
         res = supabase.table("rekap_final").select("*").ilike("nama", f"%{cari}%").order("id", desc=True).execute()
         if res.data:
             st.success(f"Ditemukan {len(res.data)} data.")
             for item in res.data:
-                # Logika Warna
                 is_lunas = item['sisa_akhir'] <= 100
-                warna = "green" if is_lunas else "#d93025" # Merah Google
-                bg = "#e6fffa" if is_lunas else "#ffeceb" # Hijau muda / Merah muda
+                warna = "green" if is_lunas else "#d93025"
+                bg = "#e6fffa" if is_lunas else "#ffeceb"
                 label = "✅ LUNAS" if is_lunas else "⚠️ BELUM LUNAS"
                 
                 with st.container():
                     st.markdown(f"""
                     <div style="border:1px solid {warna}; padding:15px; border-radius:10px; background:{bg}; margin-bottom:10px;">
                         <div style="display:flex; justify-content:space-between;">
-                            <h4 style="margin:0;">{item['nama']}</h4>
-                            <span style="font-size:12px; color:gray;">{item['tanggal_pinjam']}</span>
+                            <h4 style="margin:0;">{item['nama']} ({item['no_anggota']})</h4>
+                            <span style="font-size:12px; font-weight:bold; color:#555;">Tgl: {item['tanggal_pinjam']}</span>
                         </div>
-                        <p style="margin:0; font-size:14px; color:gray;">No: {item['no_anggota']}</p>
                         <hr style="margin:5px 0; border-top: 1px dashed {warna};">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <div>
@@ -224,12 +227,5 @@ elif menu == "🏠 Cari & Cetak":
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    st.download_button(
-                        label="📄 Download PDF",
-                        data=buat_pdf(item),
-                        file_name=f"{item['nama']}.pdf",
-                        mime="application/pdf",
-                        key=f"btn_{item['id']}"
-                    )
-        else:
-            st.warning("Tidak ditemukan.")
+                    st.download_button("📄 Download PDF", buat_pdf(item), f"{item['nama']}.pdf", "application/pdf", key=f"btn_{item['id']}")
+        else: st.warning("Tidak ditemukan.")
