@@ -5,7 +5,7 @@ from fpdf import FPDF
 from datetime import datetime, timedelta
 
 # ==========================================
-# 1. KONFIGURASI & DATABASE
+# 1. KONEKSI & FUNGSI BANTUAN
 # ==========================================
 st.set_page_config(page_title="Sistem Koperasi & Tagihan", page_icon="🏦", layout="wide")
 
@@ -37,187 +37,148 @@ def perbaiki_tanggal(nilai):
     except: return str(nilai)
 
 # ==========================================
-# 2. PDF: LAPORAN TAGIHAN KOLEKTIF (BENDAHARA)
+# 2. PDF LAPORAN GABUNGAN (Landscape)
 # ==========================================
-def buat_pdf_tagihan(df_tagihan):
-    pdf = FPDF(orientation='L', unit='mm', format='A4') # Landscape
+def buat_pdf_tagihan(df):
+    pdf = FPDF(orientation='L', unit='mm', format='A4')
     pdf.add_page()
     
     # KOP
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, "KOPERASI SIMPAN PINJAM - LAPORAN TAGIHAN", ln=True, align='C')
+    pdf.cell(0, 10, "REKAPITULASI TAGIHAN KOPERASI", ln=True, align='C')
     pdf.set_font("Arial", size=10)
-    bulan_ini = datetime.now().strftime("%B %Y")
-    pdf.cell(0, 10, f"Daftar Potongan Gaji Anggota - Periode {bulan_ini}", ln=True, align='C')
+    pdf.cell(0, 10, f"Periode: {datetime.now().strftime('%B %Y')}", ln=True, align='C')
     pdf.line(10, 25, 285, 25)
     pdf.ln(10)
     
-    # HEADER TABEL
+    # HEADER
     pdf.set_font("Arial", 'B', 9)
-    pdf.set_fill_color(200, 220, 255)
+    pdf.set_fill_color(220, 230, 240)
     
-    # Definisi Lebar Kolom (Total sktr 275mm)
-    w_no=10; w_nama=60; w_pokok=35; w_jasa=35; w_tot_pinj=40; w_wajib=35; w_total=60
+    # Lebar Kolom
+    w_no=10; w_nama=60; w_wajib=35; w_pokok=35; w_jasa=35; w_total=50
     
     pdf.cell(w_no, 10, "No", 1, 0, 'C', True)
     pdf.cell(w_nama, 10, "Nama Anggota", 1, 0, 'C', True)
+    pdf.cell(w_wajib, 10, "Simp. Wajib", 1, 0, 'C', True)
     pdf.cell(w_pokok, 10, "Angsuran Pokok", 1, 0, 'C', True)
     pdf.cell(w_jasa, 10, "Jasa (1%)", 1, 0, 'C', True)
-    pdf.cell(w_tot_pinj, 10, "Subtotal Pinjaman", 1, 0, 'C', True)
-    pdf.cell(w_wajib, 10, "Simp. Wajib", 1, 0, 'C', True)
-    pdf.cell(w_total, 10, "TOTAL POTONG GAJI", 1, 1, 'C', True)
+    pdf.cell(w_total, 10, "TOTAL TAGIHAN", 1, 1, 'C', True)
     
-    # ISI TABEL
+    # ISI
     pdf.set_font("Arial", size=9)
     no = 1
-    grand_total = 0
+    total_all = 0
     
-    for _, row in df_tagihan.iterrows():
+    for _, row in df.iterrows():
         pdf.cell(w_no, 8, str(no), 1, 0, 'C')
-        pdf.cell(w_nama, 8, str(row['nama'])[:25], 1, 0, 'L') # Potong nama biar ga panjang
+        pdf.cell(w_nama, 8, str(row['nama'])[:30], 1, 0, 'L')
+        pdf.cell(w_wajib, 8, format_rupiah(row['wajib']), 1, 0, 'R')
         pdf.cell(w_pokok, 8, format_rupiah(row['pokok']), 1, 0, 'R')
         pdf.cell(w_jasa, 8, format_rupiah(row['jasa']), 1, 0, 'R')
-        pdf.cell(w_tot_pinj, 8, format_rupiah(row['total_pinjaman']), 1, 0, 'R')
-        pdf.cell(w_wajib, 8, format_rupiah(row['wajib']), 1, 0, 'R')
         
-        # Kolom Total (Bold)
+        # Kolom Total Bold
         pdf.set_font("Arial", 'B', 9)
-        pdf.cell(w_total, 8, format_rupiah(row['total_tagihan']), 1, 1, 'R')
-        pdf.set_font("Arial", size=9) # Balikin normal
+        pdf.cell(w_total, 8, format_rupiah(row['total_bayar']), 1, 1, 'R')
+        pdf.set_font("Arial", size=9)
         
-        grand_total += row['total_tagihan']
+        total_all += row['total_bayar']
         no += 1
         
-    # TOTAL AKHIR
+    # FOOTER TOTAL
     pdf.ln(2)
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(w_no+w_nama+w_pokok+w_jasa+w_tot_pinj+w_wajib, 12, "GRAND TOTAL YANG HARUS DISETOR:", 1, 0, 'R')
-    pdf.set_fill_color(255, 255, 0) # Kuning
-    pdf.cell(w_total, 12, format_rupiah(grand_total), 1, 1, 'R', True)
+    pdf.cell(w_no+w_nama+w_wajib+w_pokok+w_jasa, 12, "GRAND TOTAL SETORAN:", 1, 0, 'R')
+    pdf.set_fill_color(255, 255, 0)
+    pdf.cell(w_total, 12, format_rupiah(total_all), 1, 1, 'R', True)
     
     # TTD
     pdf.ln(15); pdf.set_font("Arial", size=10)
     pdf.cell(200); pdf.cell(70, 6, f"Bengkulu, {datetime.now().strftime('%d-%m-%Y')}", 0, 1, 'C')
-    pdf.cell(200); pdf.cell(70, 6, "Bendahara Koperasi,", 0, 1, 'C')
-    pdf.ln(20)
-    pdf.cell(200); pdf.cell(70, 6, "( ..................................... )", 0, 1, 'C')
+    pdf.ln(20); pdf.cell(200); pdf.cell(70, 6, "( Bendahara )", 0, 1, 'C')
 
     return pdf.output(dest='S').encode('latin-1')
 
 # ==========================================
-# 3. PDF: KARTU SISA PINJAMAN (INDIVIDU)
+# 3. MENU UTAMA
 # ==========================================
-def buat_pdf_individu(data):
-    # Hitung ulang rincian untuk ditampilkan di PDF individu
-    pokok = data['plafon'] / 10
-    jasa = data['plafon'] * 0.01
-    wajib = 150000
-    total_bln = pokok + jasa + wajib
-
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 16); pdf.cell(0, 10, "KOPERASI SIMPAN PINJAM", ln=True, align='C')
-    pdf.set_font("Arial", size=10); pdf.cell(0, 10, "Kartu Sisa Pinjaman & Rincian Tagihan", ln=True, align='C')
-    pdf.line(10, 25, 200, 25); pdf.ln(10)
-    
-    pdf.set_font("Arial", size=11)
-    def baris(lbl, val):
-        pdf.cell(50, 8, lbl, 0); pdf.cell(5, 8, ":", 0); pdf.cell(0, 8, str(val), 0, 1)
-
-    baris("Nama Anggota", data['nama'])
-    baris("No. Anggota", data['no_anggota'])
-    baris("Plafon Pinjaman", format_rupiah(data['plafon']))
-    pdf.ln(5)
-    
-    # TABEL SISA
-    pdf.set_fill_color(240, 240, 240); pdf.set_font("Arial", 'B', 11)
-    pdf.cell(190, 8, "STATUS SISA PINJAMAN", 1, 1, 'C', True)
-    
-    pdf.set_font("Arial", size=11)
-    pdf.cell(100, 8, "Saldo Awal Tahun", 1); pdf.cell(90, 8, format_rupiah(data['saldo_awal_tahun']), 1, 1, 'R')
-    pdf.cell(100, 8, "Total Angsuran Masuk (Jan-Des)", 1); pdf.cell(90, 8, format_rupiah(data['total_angsuran_tahun_ini']), 1, 1, 'R')
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(100, 10, "SISA PINJAMAN SAAT INI", 1); pdf.cell(90, 10, format_rupiah(data['sisa_akhir']), 1, 1, 'R')
-    
-    pdf.ln(10)
-    
-    # TABEL RINCIAN TAGIHAN BULANAN
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(190, 8, "RINCIAN POTONGAN GAJI BULANAN (Tenor 10 Bulan)", 1, 1, 'C', True)
-    
-    pdf.set_font("Arial", size=11)
-    pdf.cell(100, 8, "1. Angsuran Pokok (Plafon / 10)", 1); pdf.cell(90, 8, format_rupiah(pokok), 1, 1, 'R')
-    pdf.cell(100, 8, "2. Jasa Koperasi (1%)", 1); pdf.cell(90, 8, format_rupiah(jasa), 1, 1, 'R')
-    pdf.cell(100, 8, "3. Simpanan Wajib", 1); pdf.cell(90, 8, format_rupiah(wajib), 1, 1, 'R')
-    
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(100, 12, "TOTAL TAGIHAN PER BULAN", 1); pdf.cell(90, 12, format_rupiah(total_bln), 1, 1, 'R')
-
-    return pdf.output(dest='S').encode('latin-1')
-
-# ==========================================
-# 4. MENU UTAMA
-# ==========================================
-menu = st.sidebar.radio("Menu Utama", ["🏠 Cari & Cetak Kartu", "💰 Tagihan Bendahara", "📥 Upload Data Excel"])
+menu = st.sidebar.radio("Navigasi", ["🏠 Upload Data Excel", "💰 Buat Tagihan", "🔍 Cek Per Orang"])
 
 # ------------------------------------------
-# MENU 1: UPLOAD (DATA SOURCE)
+# MENU 1: UPLOAD (Update Anggota & Pinjaman)
 # ------------------------------------------
-if menu == "📥 Upload Data Excel":
-    st.title("📥 Upload Data Excel")
-    st.info("Upload Excel berisi data Plafon dan Pembayaran Jan-Des.")
+if menu == "🏠 Upload Data Excel":
+    st.title("📥 Upload & Sinkronisasi Data")
+    st.info("Upload Excel untuk memperbarui data Pinjaman sekaligus Data Anggota.")
     
-    uploaded_file = st.file_uploader("Upload File (.xlsx)", type=['xlsx'])
+    uploaded_file = st.file_uploader("Upload Excel (.xlsx)", type=['xlsx'])
     
     if uploaded_file:
         try:
             df = pd.read_excel(uploaded_file)
-            df.columns = [c.strip() for c in df.columns]
+            df.columns = [c.strip() for c in df.columns] # Bersihkan spasi
+            st.write("Preview:", df.head(3))
             
-            def cari_col(keys):
-                for c in df.columns:
-                    if c.lower() in [k.lower() for k in keys]: return c
-                return None
-
-            c_nama = cari_col(['Nama', 'Nama Anggota'])
-            c_no = cari_col(['No. Anggota', 'No'])
-            c_plafon = cari_col(['Plafon'])
-            c_sebelum = cari_col(['Sebelum th 2026', 'Sebelum'])
-            c_tgl = cari_col(['Tanggal Pinjaman', 'Tgl'])
-            
-            if st.button("🚀 PROSES & SIMPAN DATABASE"):
+            if st.button("🚀 PROSES DATA"):
                 progress = st.progress(0)
+                
+                # 1. UPDATE TABEL ANGGOTA (Agar Daftar Nama Lengkap untuk Simpanan Wajib)
+                anggota_batch = []
+                seen_anggota = set()
+                
+                # Kita ambil nama & no anggota unik dari Excel
+                for _, row in df.iterrows():
+                    nama = str(row.get('Nama', 'Tanpa Nama')).strip()
+                    no = str(row.get('No. Anggota', '-')).strip()
+                    key = f"{no}-{nama}"
+                    
+                    if key not in seen_anggota and nama != 'nan':
+                        anggota_batch.append({"no_anggota": no, "nama": nama})
+                        seen_anggota.add(key)
+                
+                # Upsert ke tabel anggota (Hapus dulu biar bersih/update)
+                # Note: Idealnya upsert, tapi biar simpel kita delete all insert all untuk master anggota
+                supabase.table("anggota").delete().neq("id", 0).execute()
+                if anggota_batch:
+                    for i in range(0, len(anggota_batch), 100):
+                        supabase.table("anggota").insert(anggota_batch[i:i+100]).execute()
+                
+                # 2. UPDATE TABEL PINJAMAN (REKAP_FINAL)
                 supabase.table("rekap_final").delete().neq("id", 0).execute()
                 
-                batch = []
+                pinjaman_batch = []
                 bln_list = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des']
                 
-                for i, row in df.iterrows():
+                # Helper cari kolom
+                def get_val(r, keys):
+                    for k in keys:
+                        for c in df.columns:
+                            if k.lower() == c.lower(): return r[c]
+                    return 0
+
+                for _, row in df.iterrows():
                     try:
-                        plafon = bersihkan_angka(row.get(c_plafon, 0))
-                        val_sebelum = bersihkan_angka(row.get(c_sebelum, 0))
+                        plafon = bersihkan_angka(get_val(row, ['Plafon']))
+                        val_sebelum = bersihkan_angka(get_val(row, ['Sebelum th 2026', 'Sebelum']))
                         
-                        # LOGIKA SALDO AWAL
+                        # LOGIKA SALDO
                         if val_sebelum > 0: saldo = val_sebelum
                         else: saldo = plafon
                         
-                        # LOGIKA ANGSURAN
-                        bayar = 0
-                        cnt = 0
+                        # Hitung Bayar
+                        bayar = 0; cnt = 0
                         for b in bln_list:
-                            c = cari_col([b])
-                            if c:
-                                val = bersihkan_angka(row[c])
-                                if val > 0: bayar += val; cnt += 1
+                            v = bersihkan_angka(get_val(row, [b]))
+                            if v > 0: bayar += v; cnt += 1
                         
                         sisa = saldo - bayar
                         if sisa < 0: sisa = 0
-
-                        batch.append({
-                            "no_anggota": str(row.get(c_no, '-')),
-                            "nama": str(row.get(c_nama, 'Tanpa Nama')),
+                        
+                        pinjaman_batch.append({
+                            "no_anggota": str(row.get('No. Anggota', '-')),
+                            "nama": str(row.get('Nama', 'Tanpa Nama')),
                             "plafon": plafon,
-                            "tanggal_pinjam": perbaiki_tanggal(row.get(c_tgl, '-')),
+                            "tanggal_pinjam": perbaiki_tanggal(row.get('Tanggal Pinjaman', '-')),
                             "saldo_awal_tahun": saldo,
                             "total_angsuran_tahun_ini": bayar,
                             "sisa_akhir": sisa,
@@ -225,127 +186,123 @@ if menu == "📥 Upload Data Excel":
                         })
                     except: pass
                 
-                for k in range(0, len(batch), 100):
-                    supabase.table("rekap_final").insert(batch[k:k+100]).execute()
-                    
-                st.success(f"✅ Berhasil import {len(batch)} data.")
-        except Exception as e: st.error(str(e))
+                if pinjaman_batch:
+                    for i in range(0, len(pinjaman_batch), 100):
+                        supabase.table("rekap_final").insert(pinjaman_batch[i:i+100]).execute()
+                
+                st.success("✅ Data Anggota & Pinjaman Berhasil Diperbarui!")
+                st.balloons()
+                
+        except Exception as e: st.error(f"Error: {e}")
 
 # ------------------------------------------
-# MENU 2: TAGIHAN BENDAHARA (FITUR BARU)
+# MENU 2: TAGIHAN GABUNGAN (FITUR UTAMA)
 # ------------------------------------------
-elif menu == "💰 Tagihan Bendahara":
-    st.title("💰 Rekap Tagihan Potong Gaji")
+elif menu == "💰 Buat Tagihan":
+    st.title("💰 Rekap Tagihan Bulanan")
     st.markdown("""
-    Halaman ini menghitung otomatis tagihan untuk diserahkan ke Bendahara Kantor.
-    * **Angsuran Pokok:** Plafon / 10
-    * **Jasa:** Plafon x 1%
-    * **Simpanan Wajib:** Rp 150.000
+    **Sistem akan menghitung 2 Komponen Tagihan:**
+    1. **Simpanan Wajib:** Rp 150.000 (Untuk SEMUA nama di tabel Anggota).
+    2. **Pinjaman:** (Plafon / 10) + Jasa 1% (Hanya untuk yang punya hutang di tabel Pinjaman).
     """)
     
-    # Ambil data dari database
-    res = supabase.table("rekap_final").select("*").order("nama").execute()
+    # 1. Ambil Semua Anggota (Untuk Simpanan Wajib)
+    res_anggota = supabase.table("anggota").select("*").order("nama").execute()
+    list_anggota = res_anggota.data if res_anggota.data else []
     
-    if res.data:
-        data_tagihan = []
-        for item in res.data:
-            # Hanya buat tagihan jika SISA HUTANG MASIH ADA (> 0)
-            # ATAU jika Ibu mau semua anggota kena simpanan wajib, hapus if ini.
-            # Asumsi: Hanya yang punya pinjaman aktif yang dihitung angsuran, 
-            # tapi Simpanan Wajib mungkin untuk semua.
-            # Disini saya buat: Jika sisa > 0 hitung angsuran, jika lunas angsuran 0 tapi wajib tetap ada.
+    # 2. Ambil Data Pinjaman (Untuk Angsuran & Jasa)
+    res_pinjaman = supabase.table("rekap_final").select("*").gt("sisa_akhir", 0).execute()
+    # Buat dictionary biar gampang dicari: { "Nama Anggota": DataPinjaman }
+    dict_pinjaman = { item['nama'].strip().lower(): item for item in res_pinjaman.data } if res_pinjaman.data else {}
+    
+    if list_anggota:
+        laporan_final = []
+        
+        for agg in list_anggota:
+            nama_asli = agg['nama']
+            nama_key = nama_asli.strip().lower()
             
-            sisa = item['sisa_akhir']
-            plafon = item['plafon']
+            # A. HITUNG SIMPANAN WAJIB (Semua kena)
+            tagihan_wajib = 150000
             
-            if sisa > 100: # Kalau masih punya hutang
-                pokok = plafon / 10
-                jasa = plafon * 0.01
-            else: # Sudah lunas
-                pokok = 0
-                jasa = 0
+            # B. HITUNG PINJAMAN (Cek apakah dia punya hutang)
+            if nama_key in dict_pinjaman:
+                data_pinjam = dict_pinjaman[nama_key]
+                plafon = data_pinjam['plafon']
+                
+                # Rumus Ibu: Tenor 10 bulan + Jasa 1%
+                angsuran_pokok = plafon / 10
+                jasa_koperasi = plafon * 0.01
+            else:
+                angsuran_pokok = 0
+                jasa_koperasi = 0
             
-            wajib = 150000
-            total = pokok + jasa + wajib
+            # C. TOTAL
+            total = tagihan_wajib + angsuran_pokok + jasa_koperasi
             
-            data_tagihan.append({
-                "nama": item['nama'],
-                "pokok": pokok,
-                "jasa": jasa,
-                "total_pinjaman": pokok + jasa,
-                "wajib": wajib,
-                "total_tagihan": total
+            laporan_final.append({
+                "nama": nama_asli,
+                "wajib": tagihan_wajib,
+                "pokok": angsuran_pokok,
+                "jasa": jasa_koperasi,
+                "total_bayar": total
             })
             
-        df_tagihan = pd.DataFrame(data_tagihan)
+        # Tampilkan Tabel
+        df_lap = pd.DataFrame(laporan_final)
         
-        # Tampilkan Tabel di Layar
-        st.dataframe(df_tagihan.style.format({
-            "pokok": "Rp {:,.0f}", 
-            "jasa": "Rp {:,.0f}",
-            "total_pinjaman": "Rp {:,.0f}",
+        # Format tampilan biar cantik
+        st.dataframe(df_lap.style.format({
             "wajib": "Rp {:,.0f}",
-            "total_tagihan": "Rp {:,.0f}"
+            "pokok": "Rp {:,.0f}",
+            "jasa": "Rp {:,.0f}",
+            "total_bayar": "Rp {:,.0f}"
         }))
         
-        col1, col2 = st.columns([2,1])
-        with col1:
-            total_setor = df_tagihan['total_tagihan'].sum()
-            st.metric("Total Setoran ke Koperasi Bulan Ini", format_rupiah(total_setor))
-            
-        with col2:
-            pdf_bytes = buat_pdf_tagihan(df_tagihan)
-            st.download_button(
-                label="🖨️ Download Laporan PDF (Landscape)",
-                data=pdf_bytes,
-                file_name=f"Tagihan_Bendahara_{datetime.now().strftime('%Y_%m')}.pdf",
-                mime="application/pdf",
-                type="primary"
-            )
+        # Info Total Setoran
+        total_duit = df_lap['total_bayar'].sum()
+        st.success(f"💰 Total Uang Masuk ke Bendahara Bulan Ini: **{format_rupiah(total_duit)}**")
+        
+        # Download PDF
+        st.download_button(
+            label="🖨️ Cetak Laporan Tagihan (PDF Landscape)",
+            data=buat_pdf_tagihan(df_lap),
+            file_name="Laporan_Tagihan_Gabungan.pdf",
+            mime="application/pdf",
+            type="primary"
+        )
+        
     else:
-        st.info("Belum ada data anggota. Silakan Upload Excel dulu.")
+        st.warning("Data Anggota Kosong. Silakan Upload Excel dulu di menu Upload.")
 
 # ------------------------------------------
-# MENU 3: CARI & CETAK KARTU (VISUAL UPDATE)
+# MENU 3: CEK INDIVIDU
 # ------------------------------------------
-elif menu == "🏠 Cari & Cetak Kartu":
-    st.title("🖨️ Kartu Sisa Pinjaman")
-    cari = st.text_input("🔍 Cari Nama:", placeholder="Ketik nama...")
+elif menu == "🔍 Cek Per Orang":
+    st.title("🔍 Cek Kartu Pinjaman")
+    cari = st.text_input("Ketik Nama:")
     
     if cari:
-        res = supabase.table("rekap_final").select("*").ilike("nama", f"%{cari}%").order("id", desc=True).execute()
+        res = supabase.table("rekap_final").select("*").ilike("nama", f"%{cari}%").execute()
         if res.data:
             for item in res.data:
-                # Hitung Rincian untuk ditampilkan di layar
                 pokok = item['plafon'] / 10
                 jasa = item['plafon'] * 0.01
-                tagihan_bln = pokok + jasa + 150000
+                total_bln = pokok + jasa + 150000 # Termasuk wajib
                 
-                is_lunas = item['sisa_akhir'] <= 100
-                warna = "green" if is_lunas else "#d93025"
-                label = "LUNAS" if is_lunas else "AKTIF"
-                
-                with st.container():
-                    st.markdown(f"""
-                    <div style="border:1px solid {warna}; padding:15px; border-radius:10px; margin-bottom:10px; color:#333;">
-                        <div style="display:flex; justify-content:space-between;">
-                            <h4 style="margin:0; color:#000;">{item['nama']}</h4>
-                            <span style="background:{warna}; color:white; padding:2px 8px; border-radius:4px; font-size:12px;">{label}</span>
-                        </div>
-                        <p style="margin:0; font-size:13px; color:#555;">Plafon: {format_rupiah(item['plafon'])} | Tenor 10 Bulan</p>
-                        <hr>
-                        <div style="display:flex; justify-content:space-between;">
-                            <div>
-                                <small>Sisa Pinjaman:</small><br>
-                                <b style="font-size:18px; color:{warna}">{format_rupiah(item['sisa_akhir'])}</b>
-                            </div>
-                            <div style="text-align:right;">
-                                <small>Tagihan Bulanan (Gaji):</small><br>
-                                <b>{format_rupiah(tagihan_bln)}</b>
-                            </div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.download_button("📄 Download PDF", buat_pdf_individu(item), f"{item['nama']}.pdf", "application/pdf", key=f"btn_{item['id']}")
-        else: st.warning("Tidak ditemukan.")
+                st.markdown(f"""
+                <div style="border:1px solid #ccc; padding:15px; border-radius:10px; margin-bottom:10px; color:black;">
+                    <h4>{item['nama']}</h4>
+                    <p>Plafon: {format_rupiah(item['plafon'])} | Sisa: <b>{format_rupiah(item['sisa_akhir'])}</b></p>
+                    <hr>
+                    <b>Rincian Tagihan Bulan Ini:</b>
+                    <ul>
+                        <li>Simpanan Wajib: Rp 150.000</li>
+                        <li>Angsuran Pokok: {format_rupiah(pokok)}</li>
+                        <li>Jasa (1%): {format_rupiah(jasa)}</li>
+                        <li><b>TOTAL: {format_rupiah(total_bln)}</b></li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.warning("Tidak ditemukan data pinjaman untuk nama tersebut.")
