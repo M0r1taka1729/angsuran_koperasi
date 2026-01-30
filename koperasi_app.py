@@ -33,7 +33,8 @@ with st.sidebar:
         "👥 Data Anggota", 
         "📝 Buat Pinjaman Baru", 
         "💸 Bayar Angsuran",
-        "📜 Riwayat Transaksi"
+        "📜 Riwayat Transaksi",
+        "📥 Import Data Excel"
     ])
 
 # ==========================================
@@ -239,10 +240,6 @@ elif menu == "📜 Riwayat Transaksi":
         st.table(data_tabel)
     else:
         st.info("Belum ada transaksi.")
-
-# --- (Letakkan ini di dalam daftar menu sidebar) ---
-# Tambahkan "📥 Import Data Excel" ke list menu di sidebar
-# Contoh: menu = st.radio("Menu Utama", [..., "📥 Import Data Excel"])
 
 # --- IMPORT DATA EXCEL ---
 elif menu == "📥 Import Data Excel":
