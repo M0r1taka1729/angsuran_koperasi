@@ -353,8 +353,8 @@ elif menu == "📥 Import Data Excel":
                         supabase.table("pinjaman").insert({
                             "anggota_id": member_id,
                             "jumlah_pokok": plafon,
-                            "bunga_persen": 0, # Data migrasi biasanya bunga sudah masuk Plafon/Flat
-                            "tenor_bulan": 12, # Default
+                            "bunga_persen": 1, # Data migrasi biasanya bunga sudah masuk Plafon/Flat
+                            "tenor_bulan": 10, # Default
                             "total_tagihan": plafon, 
                             "sisa_tagihan": sisa,
                             "status": status_pinjaman,
