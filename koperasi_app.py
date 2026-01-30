@@ -246,135 +246,120 @@ elif menu == "📥 Import Data Excel":
     st.header("📥 Migrasi Data dari Excel")
     
     st.warning("""
-    ⚠️ **PENTING:** Pastikan nama kolom di Excel SAMA PERSIS dengan ini (Huruf Besar/Kecil berpengaruh):
-    1. `No. Anggota`
-    2. `Nama`
-    3. `Plafon`
-    4. `Tanggal Pinjaman`
-    5. `sebelum th 2026` (Untuk saldo awal tahun)
-    6. `jan`, `feb`, ... `Des` (Nama bulan)
+    **Petunjuk Import:**
+    1. Upload file Excel.
+    2. Tunggu sampai Tabel Preview muncul.
+    3. Baru klik tombol 'Mulai Proses'.
     """)
 
     uploaded_file = st.file_uploader("Upload File Excel (.xlsx)", type=['xlsx'])
     
+    # --- FUNGSI PEMBERSIH ANGKA ---
+    def bersihkan_angka(nilai):
+        if pd.isna(nilai) or nilai == '' or str(nilai).strip() == '-':
+            return 0
+        if isinstance(nilai, (int, float)):
+            return float(nilai)
+        str_val = str(nilai).replace('Rp', '').replace('.', '').replace(' ', '').strip()
+        str_val = str_val.replace(',', '.')
+        try:
+            return float(str_val)
+        except:
+            return 0
+    # ------------------------------
+
     if uploaded_file:
+        # 1. BACA EXCEL DULU (Di luar tombol, biar preview muncul)
         try:
             df = pd.read_excel(uploaded_file)
-            st.write("👀 **Preview Data (5 Baris Pertama):**")
+            st.write("👀 **Preview Data:**")
             st.dataframe(df.head())
             
             st.write("---")
-            col_kiri, col_kanan = st.columns(2)
+            col1, col2 = st.columns(2)
+            pakai_saldo_awal = col1.checkbox("Hitung kolom 'sebelum th 2026'?", value=True)
+            pakai_bulan = col2.checkbox("Hitung kolom Bulan (jan-Des)?", value=True)
             
-            # Opsi 1: Hitung Saldo Awal (Sebelum 2026)
-            pakai_saldo_awal = col_kiri.checkbox("Hitung kolom 'sebelum th 2026'?", value=True)
-            
-            # Opsi 2: Hitung Bulan Berjalan
-            pakai_bulan = col_kanan.checkbox("Hitung kolom Bulan (jan-Des)?", value=True)
-            
-            if st.button("🚀 Mulai Proses Import ke Database"):
-                progress_bar = st.progress(0)
+            # 2. TOMBOL EKSEKUSI
+            if st.button("🚀 Mulai Proses Import"):
+                # Variabel status_text DIDEFINISIKAN DI SINI (Setelah klik)
                 status_text = st.empty()
+                progress_bar = st.progress(0)
                 
                 total_rows = len(df)
                 success_count = 0
-                error_count = 0
                 
+                # Mulai Loop
                 for index, row in df.iterrows():
-                    status_text.text(f"Memproses baris {index+1} dari {total_rows}...")
+                    status_text.text(f"Sedang memproses baris ke-{index+1} dari {total_rows}...")
                     
                     try:
-                        # ---------------------------------------------------
-                        # 1. CEK / BUAT ANGGOTA
-                        # ---------------------------------------------------
-                        no_anggota_str = str(row['No. Anggota']).strip()
-                        nama_anggota = str(row['Nama']).strip()
+                        # A. DATA ANGGOTA
+                        no_anggota = str(row['No. Anggota']).strip()
+                        nama = str(row['Nama']).strip()
                         
-                        # Cek apakah anggota sudah ada di database?
-                        res_cek = supabase.table("anggota").select("id").eq("no_anggota", no_anggota_str).execute()
-                        
+                        # Cek Anggota di Database
+                        res_cek = supabase.table("anggota").select("id").eq("no_anggota", no_anggota).execute()
                         if res_cek.data:
-                            # Kalau sudah ada, ambil ID-nya
-                            member_id = res_cek.data[0]['id'] 
+                            member_id = res_cek.data[0]['id']
                         else:
-                            # Kalau belum ada, buat baru
-                            res_new = supabase.table("anggota").insert({
-                                "nama": nama_anggota, 
-                                "no_anggota": no_anggota_str
-                            }).execute()
+                            res_new = supabase.table("anggota").insert({"nama": nama, "no_anggota": no_anggota}).execute()
                             member_id = res_new.data[0]['id']
                         
-                        # ---------------------------------------------------
-                        # 2. HITUNG PEMBAYARAN
-                        # ---------------------------------------------------
+                        # B. HITUNG PEMBAYARAN
                         total_sudah_bayar = 0
                         
-                        # A. Hitung Saldo Tahun Lalu (sebelum th 2026)
+                        # Hitung Saldo Awal
                         if pakai_saldo_awal:
-                            # Mengambil nilai, jika kosong dianggap 0
-                            val_lalu = row.get('sebelum th 2026', 0)
-                            if pd.notnull(val_lalu) and isinstance(val_lalu, (int, float)):
-                                total_sudah_bayar += float(val_lalu)
+                            raw_val = row.get('sebelum th 2026', 0)
+                            total_sudah_bayar += bersihkan_angka(raw_val)
                         
-                        # B. Hitung Bulan Berjalan (jan, feb, dst)
+                        # Hitung Bulan
                         if pakai_bulan:
-                            # Sesuaikan nama kolom bulan dengan Excel Anda
-                            list_bulan = ['jan', 'feb', 'mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des']
-                            
-                            for col in list_bulan:
+                            bulan_cols = ['jan', 'feb', 'mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des']
+                            for col in bulan_cols:
                                 if col in df.columns:
-                                    val_bln = row[col]
-                                    # Cek apakah isinya angka
-                                    if pd.notnull(val_bln) and isinstance(val_bln, (int, float)):
-                                        total_sudah_bayar += float(val_bln)
+                                    total_sudah_bayar += bersihkan_angka(row[col])
                         
-                        # ---------------------------------------------------
-                        # 3. MASUKKAN DATA PINJAMAN
-                        # ---------------------------------------------------
-                        plafon = float(row['Plafon']) if pd.notnull(row['Plafon']) else 0
-                        
-                        # Hitung Sisa Tagihan
+                        # C. DATA PINJAMAN
+                        plafon = bersihkan_angka(row.get('Plafon', 0))
                         sisa = plafon - total_sudah_bayar
+                        if sisa < 0: sisa = 0 
                         
-                        # Tentukan Status
-                        # Jika sisa <= 0 atau kurang dari 100 rupiah (pembulatan), anggap LUNAS
-                        status_pinjaman = "LUNAS" if sisa <= 100 else "BERJALAN"
+                        status = "LUNAS" if sisa <= 100 else "BERJALAN"
                         
-                        # Ambil Tanggal (Handle jika error/kosong)
-                        tgl_str = datetime.now().date().isoformat() # Default hari ini
+                        # Handle Tanggal
+                        tgl = datetime.now().date().isoformat()
                         if 'Tanggal Pinjaman' in row and pd.notnull(row['Tanggal Pinjaman']):
                             try:
-                                # Coba konversi format tanggal excel
-                                tgl_str = pd.to_datetime(row['Tanggal Pinjaman']).date().isoformat()
-                            except:
-                                pass # Kalau gagal, pakai default
-                        
+                                tgl = pd.to_datetime(row['Tanggal Pinjaman']).date().isoformat()
+                            except: pass
+
                         # Insert ke Supabase
                         supabase.table("pinjaman").insert({
                             "anggota_id": member_id,
                             "jumlah_pokok": plafon,
-                            "bunga_persen": 1, # Data migrasi biasanya bunga sudah masuk Plafon/Flat
-                            "tenor_bulan": 10, # Default
-                            "total_tagihan": plafon, 
+                            "bunga_persen": 0,
+                            "tenor_bulan": 12,
+                            "total_tagihan": plafon,
                             "sisa_tagihan": sisa,
-                            "status": status_pinjaman,
-                            "tanggal_pinjam": tgl_str
+                            "saldo_awal_migrasi": total_sudah_bayar, # Simpan history bayar excel
+                            "status": status,
+                            "tanggal_pinjam": tgl
                         }).execute()
                         
                         success_count += 1
                         
                     except Exception as e:
-                        error_count += 1
-                        # Tampilkan error di console/log tapi jangan stop program
-                        print(f"Error baris {index}: {e}")
+                        print(f"Gagal baris {index}: {e}")
                     
-                    # Update Loading Bar
+                    # Update Progress Bar
                     progress_bar.progress((index + 1) / total_rows)
-            
-            status_text.text("Proses Selesai!")
-            st.success(f"✅ Sukses Import: {success_count} Data")
-            if error_count > 0:
-                st.warning(f"⚠️ Gagal Import: {error_count} Data (Cek format excel baris tersebut)")
                 
+                # Selesai Loop
+                status_text.text("✅ Proses Selesai!")
+                st.success(f"Berhasil mengimport {success_count} data.")
+                st.balloons()
+
         except Exception as e:
-            st.error(f"File Excel tidak terbaca. Pastikan formatnya benar. Error: {e}")
+            st.error(f"Terjadi kesalahan saat membaca file Excel: {e}")
