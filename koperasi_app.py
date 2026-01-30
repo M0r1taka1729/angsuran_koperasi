@@ -75,8 +75,10 @@ def buat_pdf(data):
     
     pdf.set_font("Arial", size=11)
     
-    # 1. Saldo Awal
-    pdf.cell(110, 10, "Sisa Pinjaman (Per Awal Tahun 2026)", 1)
+    # 1. Saldo Awal (Dasar Perhitungan)
+    # Kita bedakan labelnya biar jelas ini dari Sisa Lalu atau Pinjaman Baru
+    label_saldo = "Saldo Awal (Sisa Th Lalu / Pinjaman Baru)"
+    pdf.cell(110, 10, label_saldo, 1)
     pdf.cell(80, 10, format_rupiah(data['saldo_awal_tahun']), 1, 1, 'R')
     
     # 2. Pembayaran Tahun Ini
@@ -106,7 +108,7 @@ def buat_pdf(data):
 # ==========================================
 menu = st.sidebar.radio("Menu", ["🏠 Cari & Cetak", "📥 Upload Data Excel"])
 
-# --- MENU UPLOAD (PERBAIKAN VARIABEL) ---
+# --- MENU UPLOAD ---
 if menu == "📥 Upload Data Excel":
     st.title("📥 Upload Data Excel")
     st.info("Fitur ini akan menghapus data lama dan menggantinya dengan data Excel terbaru.")
@@ -128,7 +130,7 @@ if menu == "📥 Upload Data Excel":
                 
                 # 2. Siapkan Data Baru
                 total_data = len(df)
-                data_list = [] # <--- NAMA VARIABEL DISERAGAMKAN
+                data_list = [] 
                 
                 # List Kolom Bulan sesuai Excel Ibu
                 kolom_bulan = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des']
@@ -141,9 +143,20 @@ if menu == "📥 Upload Data Excel":
                         tgl_pinjam = str(row.get('Tanggal Pinjaman', '-'))
                         plafon = bersihkan_angka(row.get('Plafon', 0))
                         
-                        # LOGIKA UTAMA HITUNGAN
-                        saldo_awal = bersihkan_angka(row.get('Sebelum th 2026', 0))
+                        # ===========================================
+                        # 🔥 LOGIKA BARU: MENENTUKAN SALDO AWAL
+                        # ===========================================
+                        val_sebelum = bersihkan_angka(row.get('Sebelum th 2026', 0))
                         
+                        if val_sebelum > 0:
+                            # Jika ada isinya (>0), berarti ini SISA PINJAMAN LAMA
+                            saldo_basis = val_sebelum
+                        else:
+                            # Jika kosong/0, berarti ini PINJAMAN BARU 2026 (Pakai Plafon)
+                            saldo_basis = plafon
+                        # ===========================================
+                        
+                        # Hitung Angsuran (Jan - Des)
                         total_angsuran = 0
                         bulan_jalan = 0
                         
@@ -154,7 +167,8 @@ if menu == "📥 Upload Data Excel":
                                     total_angsuran += bayar
                                     bulan_jalan += 1
                         
-                        sisa = saldo_awal - total_angsuran
+                        # Hitung Sisa Akhir
+                        sisa = saldo_basis - total_angsuran
                         if sisa < 0: sisa = 0 
                         
                         # Masukkan ke list
@@ -163,7 +177,7 @@ if menu == "📥 Upload Data Excel":
                             "nama": nama,
                             "plafon": plafon,
                             "tanggal_pinjam": tgl_pinjam,
-                            "saldo_awal_tahun": saldo_awal,
+                            "saldo_awal_tahun": saldo_basis, # Ini nilai yang sudah pintar tadi
                             "total_angsuran_tahun_ini": total_angsuran,
                             "sisa_akhir": sisa,
                             "bulan_berjalan": bulan_jalan
@@ -174,10 +188,9 @@ if menu == "📥 Upload Data Excel":
                     
                     progress_bar.progress((index + 1) / total_data)
                 
-                # 3. Kirim ke Database (PERBAIKAN LOGIKA LOOPING)
+                # 3. Kirim ke Database
                 if data_list:
                     chunk_size = 100
-                    # Pastikan loop menggunakan data_list yang benar
                     for i in range(0, len(data_list), chunk_size):
                         chunk = data_list[i:i+chunk_size]
                         supabase.table("rekap_final").insert(chunk).execute()
@@ -194,7 +207,6 @@ elif menu == "🏠 Cari & Cetak":
     cari = st.text_input("🔍 Cari Nama Anggota:", placeholder="Ketik nama...")
     
     if cari:
-        # Cari data, urutkan ID desc agar data terbaru (Top Up) muncul diatas
         res = supabase.table("rekap_final").select("*").ilike("nama", f"%{cari}%").order("id", desc=True).execute()
         
         if res.data:
@@ -208,7 +220,6 @@ elif menu == "🏠 Cari & Cetak":
                 bg_color = "#e6fffa" if is_lunas else "#fff5f5"
 
                 with st.container():
-                    # Tampilan Kartu Warna-warni
                     st.markdown(f"""
                     <div style="border:1px solid {warna}; padding:15px; border-radius:10px; background-color:{bg_color}; margin-bottom:10px;">
                         <h4 style="margin:0;">{item['nama']} ({item['no_anggota']})</h4>
@@ -222,7 +233,6 @@ elif menu == "🏠 Cari & Cetak":
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # Tombol Download (Unik per ID)
                     pdf_data = buat_pdf(item)
                     st.download_button(
                         label="📄 Download PDF",
@@ -232,6 +242,6 @@ elif menu == "🏠 Cari & Cetak":
                         type="secondary" if is_lunas else "primary",
                         key=f"btn_{item['id']}" 
                     )
-                    st.write("") # Spasi antar kartu
+                    st.write("") 
         else:
             st.warning("Nama tidak ditemukan.")
