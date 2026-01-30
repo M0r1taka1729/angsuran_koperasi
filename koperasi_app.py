@@ -38,7 +38,7 @@ def bersihkan_angka(nilai):
         return 0
 
 # ==========================================
-# 2. FUNGSI CETAK PDF (PERBAIKAN ERROR)
+# 2. FUNGSI CETAK PDF
 # ==========================================
 def buat_pdf(data):
     pdf = FPDF()
@@ -55,7 +55,6 @@ def buat_pdf(data):
     # --- INFO ANGGOTA ---
     pdf.set_font("Arial", size=11)
     
-    # Fungsi bantu bikin baris titik dua rapi
     def baris_info(label, isi):
         pdf.cell(40, 8, label, 0)
         pdf.cell(5, 8, ":", 0)
@@ -71,12 +70,9 @@ def buat_pdf(data):
     # --- TABEL RINCIAN ---
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Arial", 'B', 11)
-    
-    # Header Tabel
     pdf.cell(110, 10, "KETERANGAN", 1, 0, 'C', True)
     pdf.cell(80, 10, "NOMINAL", 1, 1, 'C', True)
     
-    # Isi Tabel
     pdf.set_font("Arial", size=11)
     
     # 1. Saldo Awal
@@ -87,7 +83,7 @@ def buat_pdf(data):
     pdf.cell(110, 10, f"Total Angsuran Tahun Ini ({data['bulan_berjalan']} Bulan)", 1)
     pdf.cell(80, 10, format_rupiah(data['total_angsuran_tahun_ini']), 1, 1, 'R')
     
-    # 3. Sisa Akhir (BOLD)
+    # 3. Sisa Akhir
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(110, 12, "SISA PINJAMAN SAAT INI", 1)
     pdf.cell(80, 12, format_rupiah(data['sisa_akhir']), 1, 1, 'R')
@@ -103,8 +99,6 @@ def buat_pdf(data):
     pdf.cell(120)
     pdf.cell(70, 6, "( ..................................... )", 0, 1, 'C')
 
-    # [PERBAIKAN UTAMA DI SINI]
-    # Menggunakan dest='S' untuk string output, lalu encode ke latin-1
     return pdf.output(dest='S').encode('latin-1')
 
 # ==========================================
@@ -112,7 +106,7 @@ def buat_pdf(data):
 # ==========================================
 menu = st.sidebar.radio("Menu", ["🏠 Cari & Cetak", "📥 Upload Data Excel"])
 
-# --- MENU UPLOAD ---
+# --- MENU UPLOAD (PERBAIKAN VARIABEL) ---
 if menu == "📥 Upload Data Excel":
     st.title("📥 Upload Data Excel")
     st.info("Fitur ini akan menghapus data lama dan menggantinya dengan data Excel terbaru.")
@@ -122,7 +116,7 @@ if menu == "📥 Upload Data Excel":
     if uploaded_file:
         try:
             df = pd.read_excel(uploaded_file)
-            st.write("👀 **Preview Data:**", df.head())
+            st.write("👀 **Preview Data:**", df.head(3))
             
             # TOMBOL PROSES
             if st.button("🚀 Simpan ke Database"):
@@ -134,7 +128,7 @@ if menu == "📥 Upload Data Excel":
                 
                 # 2. Siapkan Data Baru
                 total_data = len(df)
-                data_batch = []
+                data_list = [] # <--- NAMA VARIABEL DISERAGAMKAN
                 
                 # List Kolom Bulan sesuai Excel Ibu
                 kolom_bulan = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des']
@@ -148,28 +142,23 @@ if menu == "📥 Upload Data Excel":
                         plafon = bersihkan_angka(row.get('Plafon', 0))
                         
                         # LOGIKA UTAMA HITUNGAN
-                        # A. Saldo Awal (Hutang Awal Tahun)
                         saldo_awal = bersihkan_angka(row.get('Sebelum th 2026', 0))
                         
-                        # B. Hitung Angsuran (Jan - Des)
                         total_angsuran = 0
                         bulan_jalan = 0
                         
                         for bln in kolom_bulan:
-                            # Cek apakah kolom ada di excel
                             if bln in df.columns:
                                 bayar = bersihkan_angka(row[bln])
                                 if bayar > 0:
                                     total_angsuran += bayar
                                     bulan_jalan += 1
                         
-                        # C. Hitung Sisa Akhir
-                        # Sisa = Hutang Awal - Total Bayar Tahun Ini
                         sisa = saldo_awal - total_angsuran
-                        if sisa < 0: sisa = 0 # Jaga-jaga biar ga minus
+                        if sisa < 0: sisa = 0 
                         
-                        # Masukkan ke antrian simpan
-                        data_batch.append({
+                        # Masukkan ke list
+                        data_list.append({
                             "no_anggota": no_anggota,
                             "nama": nama,
                             "plafon": plafon,
@@ -183,22 +172,17 @@ if menu == "📥 Upload Data Excel":
                     except Exception as e:
                         print(f"Error baris {index}: {e}")
                     
-                    # Update loading bar
                     progress_bar.progress((index + 1) / total_data)
                 
-                # 3. Kirim ke Database (Sekaligus biar cepat)
-                if data_batch:
-                    # Pecah jadi per 100 data biar server gak kaget
+                # 3. Kirim ke Database (PERBAIKAN LOGIKA LOOPING)
+                if data_list:
                     chunk_size = 100
-                    for i in range(0, len(data_to_insert), chunk_size): # Fixed variable name here if needed, but above uses data_batch
-                         # Correction: make sure loop uses data_batch
-                         pass 
-                    
-                    # Re-implementation of batch insert logic to be safe
-                    for i in range(0, len(data_batch), 100):
-                        supabase.table("rekap_final").insert(data_batch[i:i+100]).execute()
+                    # Pastikan loop menggunakan data_list yang benar
+                    for i in range(0, len(data_list), chunk_size):
+                        chunk = data_list[i:i+chunk_size]
+                        supabase.table("rekap_final").insert(chunk).execute()
                 
-                status.success(f"✅ Selesai! {len(data_batch)} data berhasil disimpan.")
+                status.success(f"✅ Selesai! {len(data_list)} data berhasil disimpan.")
                 
         except Exception as e:
             st.error(f"Gagal membaca Excel: {e}")
@@ -207,69 +191,47 @@ if menu == "📥 Upload Data Excel":
 elif menu == "🏠 Cari & Cetak":
     st.title("🖨️ Cetak Kartu Pinjaman")
     
-    cari = st.text_input("🔍 Cari Nama Anggota / No Anggota:", placeholder="Ketik nama atau nomor...")
+    cari = st.text_input("🔍 Cari Nama Anggota:", placeholder="Ketik nama...")
     
     if cari:
-        # Cari di Database
-        # Kita urutkan berdasarkan ID (terbaru di atas) agar Top Up muncul duluan
-        res = supabase.table("rekap_final").select("*")\
-            .or_(f"nama.ilike.%{cari}%,no_anggota.ilike.%{cari}%")\
-            .order("id", desc=True)\
-            .execute()
+        # Cari data, urutkan ID desc agar data terbaru (Top Up) muncul diatas
+        res = supabase.table("rekap_final").select("*").ilike("nama", f"%{cari}%").order("id", desc=True).execute()
         
         if res.data:
-            jumlah_aktif = sum(1 for x in res.data if x['sisa_akhir'] > 0)
-            st.success(f"Ditemukan {len(res.data)} riwayat pinjaman ({jumlah_aktif} masih aktif).")
+            st.success(f"Ditemukan {len(res.data)} data.")
             
-            # Pisahkan data: Aktif dulu, baru Lunas
-            data_aktif = [x for x in res.data if x['sisa_akhir'] > 0]
-            data_lunas = [x for x in res.data if x['sisa_akhir'] <= 0]
-            
-            # Gabungkan kembali (Aktif di atas)
-            data_urut = data_aktif + data_lunas
-            
-            for item in data_urut:
-                # Tentukan Status Visual
+            for item in res.data:
+                # Tentukan Status Lunas/Belum
                 is_lunas = item['sisa_akhir'] <= 0
-                warna_status = "green" if is_lunas else "red"
-                label_status = "✅ SUDAH LUNAS" if is_lunas else "⚠️ BELUM LUNAS (AKTIF)"
-                bg_color = "#f0fdf4" if is_lunas else "#fef2f2" # Hijau muda / Merah muda
-                
-                # Tampilan Kartu
+                warna = "green" if is_lunas else "red"
+                label_status = "✅ LUNAS" if is_lunas else "⚠️ BELUM LUNAS"
+                bg_color = "#e6fffa" if is_lunas else "#fff5f5"
+
                 with st.container():
+                    # Tampilan Kartu Warna-warni
                     st.markdown(f"""
-                    <div style="
-                        border: 1px solid {warna_status}; 
-                        border-radius: 10px; 
-                        padding: 15px; 
-                        margin-bottom: 10px;
-                        background-color: {bg_color};
-                    ">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div>
-                                <h4 style="margin:0; color:black;">{item['nama']}</h4>
-                                <small style="color:gray;">No: {item['no_anggota']} | Tgl Pinjam: {item['tanggal_pinjam']}</small>
-                            </div>
-                            <div style="text-align:right;">
-                                <h4 style="margin:0; color:{warna_status};">{format_rupiah(item['sisa_akhir'])}</h4>
-                                <small style="font-weight:bold; color:{warna_status};">{label_status}</small>
-                            </div>
+                    <div style="border:1px solid {warna}; padding:15px; border-radius:10px; background-color:{bg_color}; margin-bottom:10px;">
+                        <h4 style="margin:0;">{item['nama']} ({item['no_anggota']})</h4>
+                        <p style="margin:0; font-size:14px; color:gray;">Tgl Pinjam: {item['tanggal_pinjam']}</p>
+                        <hr style="margin:5px 0;">
+                        <div style="display:flex; justify-content:space-between;">
+                            <span>Sisa Pinjaman:</span>
+                            <span style="font-weight:bold; font-size:18px; color:{warna};">{format_rupiah(item['sisa_akhir'])}</span>
                         </div>
+                        <div style="text-align:right; font-size:12px; font-weight:bold; color:{warna};">{label_status}</div>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # Tombol Download (Hanya muncul di bawah kartu visual)
-                    c1, c2 = st.columns([4, 1])
-                    with c2:
-                        pdf_data = buat_pdf(item)
-                        st.download_button(
-                            label="📄 Download PDF",
-                            data=pdf_data,
-                            file_name=f"Info_{item['nama']}_{item['id']}.pdf",
-                            mime="application/pdf",
-                            type="secondary" if is_lunas else "primary",
-                            key=f"btn_dl_{item['id']}"
-                        )
-                    st.write("") # Jarak antar kartu
+                    # Tombol Download (Unik per ID)
+                    pdf_data = buat_pdf(item)
+                    st.download_button(
+                        label="📄 Download PDF",
+                        data=pdf_data,
+                        file_name=f"Info_Pinjaman_{item['nama']}.pdf",
+                        mime="application/pdf",
+                        type="secondary" if is_lunas else "primary",
+                        key=f"btn_{item['id']}" 
+                    )
+                    st.write("") # Spasi antar kartu
         else:
-            st.warning("Data tidak ditemukan.")
+            st.warning("Nama tidak ditemukan.")
