@@ -6,7 +6,7 @@ import io
 from datetime import datetime
 
 # ==========================================
-# 1. KONEKSI DATABASE
+# 1. KONEKSI DATABASE & KONFIGURASI
 # ==========================================
 st.set_page_config(page_title="Aplikasi Koperasi", page_icon="📒", layout="wide")
 
@@ -22,19 +22,19 @@ def format_rupiah(angka):
     if angka is None: return "Rp 0"
     return f"Rp {angka:,.0f}".replace(",", ".")
 
-# Fungsi pembersih angka (Hapus Rp, Titik, Koma, Strip)
+# Fungsi pembersih angka (Hapus Rp, Titik, Koma, Strip, NaN)
 def bersihkan_angka(nilai):
-    # Cek jika kosong/nan
+    # Cek null/kosong/error excel
     if pd.isna(nilai) or str(nilai).strip() in ['', 'nan', 'Nan', '#N/A']:
         return 0
-    # Cek jika strip (-)
+    # Cek tanda strip (-)
     if str(nilai).strip() == '-':
         return 0
-    
+    # Jika sudah angka
     if isinstance(nilai, (int, float)):
         return float(nilai)
     
-    # Bersihkan format text
+    # Bersihkan string
     str_val = str(nilai).replace('Rp', '').replace('.', '').replace(' ', '')
     str_val = str_val.replace(',', '.') 
     try:
@@ -80,8 +80,8 @@ def buat_pdf(data):
     
     pdf.set_font("Arial", size=11)
     
-    # 1. Saldo Awal
-    pdf.cell(110, 10, "Saldo Awal (Sisa Lalu / Pinjaman Baru)", 1)
+    # 1. Saldo Awal (Dasar Hitungan)
+    pdf.cell(110, 10, "Saldo Awal (Pinjaman Baru / Sisa Lalu)", 1)
     pdf.cell(80, 10, format_rupiah(data['saldo_awal_tahun']), 1, 1, 'R')
     
     # 2. Pembayaran Tahun Ini
@@ -104,6 +104,7 @@ def buat_pdf(data):
     pdf.cell(120)
     pdf.cell(70, 6, "( ..................................... )", 0, 1, 'C')
 
+    # Encode latin-1 agar PDF valid
     return pdf.output(dest='S').encode('latin-1')
 
 # ==========================================
@@ -114,7 +115,7 @@ menu = st.sidebar.radio("Menu", ["🏠 Cari & Cetak", "📥 Upload Data Excel"])
 # --- MENU UPLOAD ---
 if menu == "📥 Upload Data Excel":
     st.title("📥 Upload Data Excel")
-    st.info("Logika Baru: Jika kolom 'Sebelum th 2026' KOSONG, otomatis dianggap Pinjaman Baru (Sisa Hutang = Plafon).")
+    st.info("Logika: Jika 'Sebelum th 2026' = 0, maka dianggap Pinjaman Baru (Saldo = Plafon).")
     
     uploaded_file = st.file_uploader("Pilih File Excel (.xlsx)", type=['xlsx'])
     
@@ -127,10 +128,10 @@ if menu == "📥 Upload Data Excel":
                 progress_bar = st.progress(0)
                 status = st.empty()
                 
-                # 1. Bersihkan Data Lama
+                # 1. Hapus Data Lama
                 supabase.table("rekap_final").delete().neq("id", 0).execute()
                 
-                # 2. Siapkan Data Baru
+                # 2. Proses Data Baru
                 total_data = len(df)
                 data_list = [] 
                 
@@ -145,25 +146,16 @@ if menu == "📥 Upload Data Excel":
                         plafon = bersihkan_angka(row.get('Plafon', 0))
                         
                         # ===========================================
-                        # 🔥 LOGIKA CERDAS: MENENTUKAN SALDO AWAL
+                        # 🔥 LOGIKA PERBAIKAN: MENENTUKAN SALDO AWAL
                         # ===========================================
+                        val_sebelum = bersihkan_angka(row.get('Sebelum th 2026', 0))
                         
-                        # Cek isi mentah kolom 'Sebelum th 2026'
-                        raw_sebelum = row.get('Sebelum th 2026')
-                        
-                        # Cek apakah kolom tersebut KOSONG (NaN/Empty)
-                        is_empty = pd.isna(raw_sebelum) or str(raw_sebelum).strip() == ''
-                        
-                        if is_empty:
-                            # Jika KOSONG -> Berarti Pinjaman Baru 2026
-                            # Saldo Awal kita ambil dari PLAFON
-                            saldo_basis = plafon
+                        if val_sebelum > 0:
+                            # Jika ada angkanya (>0) -> Berarti Sisa Hutang Lama
+                            saldo_basis = val_sebelum
                         else:
-                            # Jika ADA ISI (Angka 0, Strip -, atau Angka besar)
-                            # Berarti data lama. Kita bersihkan isinya.
-                            val_bersih = bersihkan_angka(raw_sebelum)
-                            saldo_basis = val_bersih
-                        
+                            # Jika 0 atau Kosong -> Berarti Pinjaman Baru (Pakai PLAFON)
+                            saldo_basis = plafon
                         # ===========================================
                         
                         # Hitung Angsuran (Jan - Des)
@@ -178,12 +170,10 @@ if menu == "📥 Upload Data Excel":
                                     bulan_jalan += 1
                         
                         # Hitung Sisa Akhir
-                        # Sisa = Saldo Basis - Angsuran Tahun Ini
                         sisa = saldo_basis - total_angsuran
-                        
-                        # Mencegah minus (kecuali memang lebih bayar, tapi kita nolkan saja biar rapi)
                         if sisa < 0: sisa = 0 
                         
+                        # Masukkan ke list
                         data_list.append({
                             "no_anggota": no_anggota,
                             "nama": nama,
@@ -219,21 +209,21 @@ elif menu == "🏠 Cari & Cetak":
     cari = st.text_input("🔍 Cari Nama Anggota:", placeholder="Ketik nama...")
     
     if cari:
-        # Urutkan ID desc agar data Top Up (Baru) muncul paling atas
+        # Urutkan ID desc agar data terbaru muncul di atas
         res = supabase.table("rekap_final").select("*").ilike("nama", f"%{cari}%").order("id", desc=True).execute()
         
         if res.data:
             st.success(f"Ditemukan {len(res.data)} data.")
             
             for item in res.data:
-                # Tentukan Status Lunas/Belum
-                # Logic: Kalau sisa <= 100 perak dianggap lunas (toleransi pembulatan)
-                is_lunas = item['sisa_akhir'] <= 100
+                # Tentukan Status Lunas
+                is_lunas = item['sisa_akhir'] <= 100 # Toleransi 100 rupiah
                 warna = "green" if is_lunas else "red"
                 label_status = "✅ LUNAS" if is_lunas else "⚠️ BELUM LUNAS"
                 bg_color = "#e6fffa" if is_lunas else "#fff5f5"
 
                 with st.container():
+                    # Tampilan Kartu
                     st.markdown(f"""
                     <div style="border:1px solid {warna}; padding:15px; border-radius:10px; background-color:{bg_color}; margin-bottom:10px;">
                         <h4 style="margin:0;">{item['nama']} ({item['no_anggota']})</h4>
@@ -247,6 +237,7 @@ elif menu == "🏠 Cari & Cetak":
                     </div>
                     """, unsafe_allow_html=True)
                     
+                    # Tombol Download
                     pdf_data = buat_pdf(item)
                     st.download_button(
                         label="📄 Download PDF",
@@ -254,7 +245,7 @@ elif menu == "🏠 Cari & Cetak":
                         file_name=f"Info_Pinjaman_{item['nama']}.pdf",
                         mime="application/pdf",
                         type="secondary" if is_lunas else "primary",
-                        key=f"btn_{item['id']}" 
+                        key=f"btn_{item['id']}"  # KUNCI UNIK BIAR GAK ERROR
                     )
                     st.write("") 
         else:
