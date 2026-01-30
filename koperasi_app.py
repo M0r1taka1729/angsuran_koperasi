@@ -246,15 +246,15 @@ elif menu == "📥 Import Data Excel":
     st.header("📥 Migrasi Data dari Excel")
     
     st.warning("""
-    **Petunjuk Import:**
-    1. Upload file Excel.
-    2. Tunggu sampai Tabel Preview muncul.
-    3. Baru klik tombol 'Mulai Proses'.
+    **LOGIKA PERHITUNGAN BARU:**
+    Sisa Tagihan = (Nilai kolom `sebelum th 2026`) - (Total Bayar `jan` s/d `Des`).
+    
+    *Pastikan kolom 'sebelum th 2026' berisi sisa hutang awal tahun, bukan jumlah bayar.*
     """)
 
     uploaded_file = st.file_uploader("Upload File Excel (.xlsx)", type=['xlsx'])
     
-    # --- FUNGSI PEMBERSIH ANGKA ---
+    # Fungsi Pembersih Angka (Wajib Ada)
     def bersihkan_angka(nilai):
         if pd.isna(nilai) or nilai == '' or str(nilai).strip() == '-':
             return 0
@@ -266,10 +266,8 @@ elif menu == "📥 Import Data Excel":
             return float(str_val)
         except:
             return 0
-    # ------------------------------
 
     if uploaded_file:
-        # 1. BACA EXCEL DULU (Di luar tombol, biar preview muncul)
         try:
             df = pd.read_excel(uploaded_file)
             st.write("👀 **Preview Data:**")
@@ -277,28 +275,25 @@ elif menu == "📥 Import Data Excel":
             
             st.write("---")
             col1, col2 = st.columns(2)
-            pakai_saldo_awal = col1.checkbox("Hitung kolom 'sebelum th 2026'?", value=True)
-            pakai_bulan = col2.checkbox("Hitung kolom Bulan (jan-Des)?", value=True)
+            pakai_saldo_awal = col1.checkbox("Kolom 'sebelum th 2026' adalah Sisa Hutang Awal?", value=True)
+            pakai_bulan = col2.checkbox("Kurangi dengan pembayaran Bulan (jan-Des)?", value=True)
             
-            # 2. TOMBOL EKSEKUSI
             if st.button("🚀 Mulai Proses Import"):
-                # Variabel status_text DIDEFINISIKAN DI SINI (Setelah klik)
                 status_text = st.empty()
                 progress_bar = st.progress(0)
                 
                 total_rows = len(df)
                 success_count = 0
                 
-                # Mulai Loop
                 for index, row in df.iterrows():
-                    status_text.text(f"Sedang memproses baris ke-{index+1} dari {total_rows}...")
+                    status_text.text(f"Memproses baris ke-{index+1}...")
                     
                     try:
-                        # A. DATA ANGGOTA
+                        # 1. DATA ANGGOTA
                         no_anggota = str(row['No. Anggota']).strip()
                         nama = str(row['Nama']).strip()
                         
-                        # Cek Anggota di Database
+                        # Cek / Buat Anggota
                         res_cek = supabase.table("anggota").select("id").eq("no_anggota", no_anggota).execute()
                         if res_cek.data:
                             member_id = res_cek.data[0]['id']
@@ -306,44 +301,51 @@ elif menu == "📥 Import Data Excel":
                             res_new = supabase.table("anggota").insert({"nama": nama, "no_anggota": no_anggota}).execute()
                             member_id = res_new.data[0]['id']
                         
-                        # B. HITUNG PEMBAYARAN
-                        total_sudah_bayar = 0
+                        # 2. LOGIKA PERHITUNGAN BARU
                         
-                        # Hitung Saldo Awal
+                        # A. Ambil Saldo Hutang Awal Tahun
+                        saldo_hutang_awal = 0
                         if pakai_saldo_awal:
+                            # Ini adalah HUTANG, bukan pembayaran
                             raw_val = row.get('sebelum th 2026', 0)
-                            total_sudah_bayar += bersihkan_angka(raw_val)
+                            saldo_hutang_awal = bersihkan_angka(raw_val)
                         
-                        # Hitung Bulan
+                        # B. Hitung Total Pembayaran Tahun Ini
+                        total_bayar_tahun_ini = 0
                         if pakai_bulan:
                             bulan_cols = ['jan', 'feb', 'mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des']
                             for col in bulan_cols:
                                 if col in df.columns:
-                                    total_sudah_bayar += bersihkan_angka(row[col])
+                                    total_bayar_tahun_ini += bersihkan_angka(row[col])
                         
-                        # C. DATA PINJAMAN
-                        plafon = bersihkan_angka(row.get('Plafon', 0))
-                        sisa = plafon - total_sudah_bayar
-                        if sisa < 0: sisa = 0 
+                        # C. Hitung Sisa Akhir
+                        # Sisa = Hutang Awal - Yang Sudah Dibayar Tahun Ini
+                        sisa_akhir = saldo_hutang_awal - total_bayar_tahun_ini
                         
-                        status = "LUNAS" if sisa <= 100 else "BERJALAN"
+                        # Koreksi jika minus (Berarti lunas/lebih bayar)
+                        if sisa_akhir < 0: sisa_akhir = 0 
                         
-                        # Handle Tanggal
-                        tgl = datetime.now().date().isoformat()
-                        if 'Tanggal Pinjaman' in row and pd.notnull(row['Tanggal Pinjaman']):
-                            try:
-                                tgl = pd.to_datetime(row['Tanggal Pinjaman']).date().isoformat()
-                            except: pass
+                        # Status
+                        status = "LUNAS" if sisa_akhir <= 100 else "BERJALAN"
+                        
+                        # D. Data Pelengkap (Plafon hanya untuk catatan)
+                        plafon_asli = bersihkan_angka(row.get('Plafon', 0))
+                        
+                        # Tanggal
+                        try:
+                            tgl = pd.to_datetime(row['Tanggal Pinjaman']).date().isoformat()
+                        except:
+                            tgl = datetime.now().date().isoformat()
 
-                        # Insert ke Supabase
+                        # 3. INSERT KE DATABASE
                         supabase.table("pinjaman").insert({
                             "anggota_id": member_id,
-                            "jumlah_pokok": plafon,
-                            "bunga_persen": 1,
-                            "tenor_bulan": 10,
-                            "total_tagihan": plafon,
-                            "sisa_tagihan": sisa,
-                            "saldo_awal_migrasi": total_sudah_bayar, # Simpan history bayar excel
+                            "jumlah_pokok": plafon_asli,   # Data historis
+                            "bunga_persen": 0,
+                            "tenor_bulan": 12,
+                            "total_tagihan": saldo_hutang_awal, # Tagihan tahun ini basisnya saldo awal
+                            "sisa_tagihan": sisa_akhir,         # <--- HASIL PERHITUNGAN BARU
+                            "saldo_awal_migrasi": saldo_hutang_awal, # Disimpan agar bisa dilacak
                             "status": status,
                             "tanggal_pinjam": tgl
                         }).execute()
@@ -353,13 +355,10 @@ elif menu == "📥 Import Data Excel":
                     except Exception as e:
                         print(f"Gagal baris {index}: {e}")
                     
-                    # Update Progress Bar
                     progress_bar.progress((index + 1) / total_rows)
                 
-                # Selesai Loop
                 status_text.text("✅ Proses Selesai!")
                 st.success(f"Berhasil mengimport {success_count} data.")
-                st.balloons()
-
+                
         except Exception as e:
-            st.error(f"Terjadi kesalahan saat membaca file Excel: {e}")
+            st.error(f"Error membaca file: {e}")
