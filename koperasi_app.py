@@ -239,3 +239,96 @@ elif menu == "📜 Riwayat Transaksi":
         st.table(data_tabel)
     else:
         st.info("Belum ada transaksi.")
+
+# --- (Letakkan ini di dalam daftar menu sidebar) ---
+# Tambahkan "📥 Import Data Excel" ke list menu di sidebar
+# Contoh: menu = st.radio("Menu Utama", [..., "📥 Import Data Excel"])
+
+# --- IMPORT DATA EXCEL ---
+elif menu == "📥 Import Data Excel":
+    st.header("📥 Migrasi Data dari Excel")
+    
+    st.info("""
+    **Format Excel yang Diterima:**
+    Pastikan nama kolom di baris pertama SAMA PERSIS dengan ini:
+    `No. Anggota`, `Nama`, `Plafon`, `Tanggal Pinjaman`
+    
+    *(Kolom Jan, Feb, Des, dll akan diabaikan/dihitung otomatis sebagai 'Sudah Dibayar' jika Anda mau)*
+    """)
+
+    uploaded_file = st.file_uploader("Upload File Excel (.xlsx)", type=['xlsx'])
+    
+    if uploaded_file:
+        df = pd.read_excel(uploaded_file)
+        st.write("Preview Data:")
+        st.dataframe(df.head())
+        
+        # Opsi Migrasi
+        hitung_jan_des = st.checkbox("Hitung kolom Jan-Des sebagai 'Sudah Dibayar'?")
+        
+        if st.button("🚀 Mulai Proses Import"):
+            progress_text = st.empty()
+            progress_bar = st.progress(0)
+            
+            total_rows = len(df)
+            success_count = 0
+            
+            for index, row in df.iterrows():
+                try:
+                    # 1. PROSES ANGGOTA
+                    # Cek apakah anggota sudah ada berdasarkan No. Anggota
+                    res_cek = supabase.table("anggota").select("id").eq("no_anggota", str(row['No. Anggota'])).execute()
+                    
+                    if res_cek.data:
+                        member_id = res_cek.data[0]['id'] # Pakai ID lama
+                    else:
+                        # Buat Anggota Baru
+                        res_new = supabase.table("anggota").insert({
+                            "nama": row['Nama'], 
+                            "no_anggota": str(row['No. Anggota'])
+                        }).execute()
+                        member_id = res_new.data[0]['id']
+                    
+                    # 2. HITUNG PEMBAYARAN LAMA (JAN-DES)
+                    sudah_bayar = 0
+                    if hitung_jan_des:
+                        # List nama bulan sesuai kolom di Excel Anda
+                        bulan_cols = ['jan', 'feb', 'mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des']
+                        for col in bulan_cols:
+                            if col in df.columns:
+                                val = row[col]
+                                # Jika isi sel adalah angka (bukan kosong/strip), tambahkan ke total bayar
+                                if pd.notnull(val) and isinstance(val, (int, float)):
+                                    sudah_bayar += val
+                    
+                    # 3. PROSES PINJAMAN
+                    plafon = float(row['Plafon'])
+                    # Asumsi: Bunga 0% untuk data migrasi (atau sesuaikan), Tenor 12 bulan default
+                    # Sisa Tagihan = Plafon - (Total yang sudah dibayar di Jan-Des)
+                    sisa = plafon - sudah_bayar
+                    status_pinjaman = "LUNAS" if sisa <= 0 else "BERJALAN"
+                    
+                    # Tanggal: Handle jika kosong/error, default hari ini
+                    tgl_pinjam = row['Tanggal Pinjaman'] if pd.notnull(row['Tanggal Pinjaman']) else datetime.now().date()
+                    
+                    # Masukkan ke Supabase
+                    supabase.table("pinjaman").insert({
+                        "anggota_id": member_id,
+                        "jumlah_pokok": plafon,
+                        "bunga_persen": 0, # Data lama anggap netral
+                        "tenor_bulan": 12, # Default
+                        "total_tagihan": plafon, 
+                        "sisa_tagihan": sisa,
+                        "status": status_pinjaman,
+                        "tanggal_pinjam": str(tgl_pinjam)
+                    }).execute()
+                    
+                    success_count += 1
+                    
+                except Exception as e:
+                    st.error(f"Gagal di baris {index+2} ({row.get('Nama', 'Unknown')}): {e}")
+                
+                # Update Progress
+                progress_bar.progress((index + 1) / total_rows)
+            
+            st.success(f"✅ Selesai! Berhasil mengimport {success_count} data pinjaman.")
