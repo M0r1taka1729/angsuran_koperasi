@@ -49,7 +49,7 @@ def buat_pdf(data):
     
     # KOP
     pdf.set_font("Arial", 'B', 16); pdf.cell(0, 10, "KOPERASI SIMPAN PINJAM", ln=True, align='C')
-    pdf.set_font("Arial", size=10); pdf.cell(0, 10, "Laporan Status Sisa Pinjaman Anggota", ln=True, align='C')
+    pdf.set_font("Arial", size=10); pdf.cell(0, 13, "Laporan Status Sisa Pinjaman Anggota", ln=True, align='C')
     pdf.line(10, 25, 200, 25); pdf.ln(10)
     
     # INFO
@@ -191,7 +191,7 @@ elif menu == "🏠 Cari & Cetak":
                     <div style="border:1px solid {warna}; padding:15px; border-radius:10px; background:{bg}; margin-bottom:10px;">
                         <div style="display:flex; justify-content:space-between;">
                             <h4 style="margin:0;">{item['nama']} ({item['no_anggota']})</h4>
-                            <small style="color:#555;">Tgl: {item['tanggal_pinjam']}</small>
+                            <small style="color:#07231d;">Tgl: {item['tanggal_pinjam']}</small>
                         </div>
                         <hr style="border-top: 1px dashed {warna};">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
