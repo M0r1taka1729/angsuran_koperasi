@@ -49,7 +49,7 @@ def buat_pdf(data):
     
     # KOP
     pdf.set_font("Arial", 'B', 16); pdf.cell(0, 10, "KOPERASI SIMPAN PINJAM", ln=True, align='C')
-    pdf.set_font("Arial", size=10); pdf.cell(0, 13, "Laporan Status Sisa Pinjaman Anggota", ln=True, align='C')
+    pdf.set_font("Arial", size=10); pdf.cell(0, 15, "Laporan Status Sisa Pinjaman Anggota", ln=True, align='C')
     pdf.line(10, 25, 200, 25); pdf.ln(10)
     
     # INFO
