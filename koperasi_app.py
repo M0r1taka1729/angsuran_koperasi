@@ -72,13 +72,14 @@ elif menu == "👥 Data Anggota":
     
     with tab1:
         with st.form("add_member"):
+            # Inputan dikurangi, hanya Nama dan No Anggota
             nama = st.text_input("Nama Lengkap")
             no_anggota = st.text_input("Nomor Anggota (Unik)")
-            hp = st.text_input("No HP/WA")
-            alamat = st.text_area("Alamat")
+            
             if st.form_submit_button("Simpan Anggota"):
                 try:
-                    data = {"nama": nama, "no_anggota": no_anggota, "no_hp": hp, "alamat": alamat}
+                    # Data yang dikirim ke database hanya 2
+                    data = {"nama": nama, "no_anggota": no_anggota}
                     supabase.table("anggota").insert(data).execute()
                     st.success("Anggota berhasil ditambahkan!")
                 except Exception as e:
@@ -88,7 +89,8 @@ elif menu == "👥 Data Anggota":
         res = supabase.table("anggota").select("*").order("nama").execute()
         if res.data:
             df = pd.DataFrame(res.data)
-            st.dataframe(df[['no_anggota', 'nama', 'no_hp', 'alamat']], use_container_width=True)
+            # Tampilkan tabel yang lebih ringkas
+            st.dataframe(df[['no_anggota', 'nama']], use_container_width=True)
         else:
             st.info("Belum ada data anggota.")
 
