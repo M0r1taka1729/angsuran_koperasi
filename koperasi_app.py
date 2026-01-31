@@ -1,4 +1,4 @@
-import streamlit as st
+zimport streamlit as st
 from supabase import create_client
 import pandas as pd
 from fpdf import FPDF
@@ -37,24 +37,25 @@ def perbaiki_tanggal(nilai):
     except: return str(nilai)
 
 # ==========================================
-# 2. PDF GENERATOR
+# 2. PDF GENERATOR (PERBAIKAN TANDA TANGAN)
 # ==========================================
 def buat_pdf_tagihan(df, judul_laporan):
+    # A4 Landscape: Lebar 297mm, Tinggi 210mm
     pdf = FPDF(orientation='L', unit='mm', format='A4')
     pdf.add_page()
     
-    # KOP
+    # --- KOP SURAT ---
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, "KOPERASI PENGAYOMAAN", ln=True, align='C')
+    pdf.cell(0, 10, "KOPERASI SIMPAN PINJAM", ln=True, align='C')
     pdf.set_font("Arial", size=12)
     pdf.cell(0, 10, judul_laporan.upper(), ln=True, align='C')
     pdf.set_font("Arial", size=10)
-    pdf.cell(0, 10, f"Periode: {datetime.now().strftime('%B %Y')}", ln=True, align='C')
+    pdf.cell(0, 5, f"Periode: {datetime.now().strftime('%B %Y')}", ln=True, align='C')
     pdf.line(10, 35, 285, 35)
     pdf.ln(10)
     
-    # HEADER
-    pdf.set_font("Arial", 'B', 8)
+    # --- HEADER TABEL ---
+    pdf.set_font("Arial", 'B', 9)
     pdf.set_fill_color(220, 230, 240)
     
     w_no=10; w_nama=60; w_wajib=35; w_pokok=35; w_jasa=35; w_total=50
@@ -66,8 +67,8 @@ def buat_pdf_tagihan(df, judul_laporan):
     pdf.cell(w_jasa, 10, "Jasa (1%)", 1, 0, 'C', True)
     pdf.cell(w_total, 10, "TOTAL TAGIHAN", 1, 1, 'C', True)
     
-    # ISI
-    pdf.set_font("Arial", size=8)
+    # --- ISI TABEL ---
+    pdf.set_font("Arial", size=9)
     no = 1
     total_all = 0
     
@@ -85,15 +86,34 @@ def buat_pdf_tagihan(df, judul_laporan):
         total_all += row['total_bayar']
         no += 1
         
+    # --- FOOTER TOTAL ---
     pdf.ln(2)
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(w_no+w_nama+w_wajib+w_pokok+w_jasa, 12, "TOTAL:", 1, 0, 'R')
     pdf.set_fill_color(255, 255, 0)
     pdf.cell(w_total, 12, format_rupiah(total_all), 1, 1, 'R', True)
     
-    pdf.ln(15); pdf.set_font("Arial", size=10)
-    pdf.cell(200); pdf.cell(70, 6, f"Bengkulu, {datetime.now().strftime('%d-%m-%Y')}", 0, 1, 'C')
-    pdf.ln(20); pdf.cell(200); pdf.cell(70, 6, "( Bendahara )", 0, 1, 'C')
+    # --- LOGIKA TANDA TANGAN MENYATU ---
+    # Tinggi A4 Landscape = 210mm. Batas aman bawah sekitar 190mm.
+    # Kita butuh sekitar 40mm space untuk tanda tangan.
+    # Jika posisi cursor (get_y) sudah di atas 160, paksa pindah halaman.
+    
+    if pdf.get_y() > 160:
+        pdf.add_page()
+    
+    pdf.ln(15) # Jarak dari tabel
+    pdf.set_font("Arial", size=10)
+    
+    # Posisi Tanggal (Kanan)
+    # 200 adalah indentasi dari kiri (Agar teks ada di sebelah kanan kertas)
+    pdf.cell(200) 
+    pdf.cell(70, 6, f"Bengkulu, {datetime.now().strftime('%d-%m-%Y')}", 0, 1, 'C')
+    
+    pdf.ln(20) # Jarak untuk tanda tangan
+    
+    # Posisi Nama Bendahara (Kanan)
+    pdf.cell(200)
+    pdf.cell(70, 6, "( Bendahara )", 0, 1, 'C')
 
     return pdf.output(dest='S').encode('latin-1')
 
