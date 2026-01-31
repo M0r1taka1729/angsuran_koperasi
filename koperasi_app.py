@@ -28,26 +28,15 @@ def bersihkan_angka(nilai):
     try: return float(str_val)
     except: return 0
 
-# FUNGSI PARSE TANGGAL & TAHUN (Sangat Penting!)
 def proses_tanggal(nilai):
-    # Return: (String Tanggal, Tahun Integer)
-    default_res = ("-", 0)
-    
-    if pd.isna(nilai) or str(nilai).strip() in ['', '-', 'nan']: 
-        return default_res
-        
+    if pd.isna(nilai) or str(nilai).strip() in ['', '-', 'nan']: return "-", 0
     try:
-        # 1. Cek format Angka Excel (Serial)
         if isinstance(nilai, (int, float)) or (isinstance(nilai, str) and nilai.isdigit()):
             py_date = datetime(1899, 12, 30) + timedelta(days=float(nilai))
             return py_date.strftime("%d-%m-%Y"), py_date.year
-            
-        # 2. Cek format String Standar
         py_date = pd.to_datetime(nilai)
         return py_date.strftime("%d-%m-%Y"), py_date.year
-        
-    except:
-        return str(nilai), 0 # Gagal parsing
+    except: return str(nilai), 0
 
 # ==========================================
 # 2. PDF GENERATOR
@@ -69,7 +58,6 @@ def buat_pdf_tagihan(df, judul_laporan):
     # HEADER
     pdf.set_font("Arial", 'B', 9)
     pdf.set_fill_color(220, 230, 240)
-    
     w_no=10; w_nama=60; w_wajib=35; w_pokok=35; w_jasa=35; w_total=50
     
     pdf.cell(w_no, 10, "No", 1, 0, 'C', True)
@@ -98,14 +86,12 @@ def buat_pdf_tagihan(df, judul_laporan):
         pdf.set_font("Arial", 'B', 9)
         pdf.cell(w_total, 8, format_rupiah(row['total_bayar']), 1, 1, 'R')
         pdf.set_font("Arial", size=9)
-        
         no += 1
         
-    # FOOTER TOTAL
+    # FOOTER
     pdf.ln(5)
     if pdf.get_y() > 150: pdf.add_page()
     
-    # Kotak Rekap Kanan
     pdf.set_x(180)
     pdf.set_font("Arial", '', 10)
     pdf.cell(60, 8, "Total Simpanan Wajib", 1, 0, 'L')
@@ -121,7 +107,6 @@ def buat_pdf_tagihan(df, judul_laporan):
     pdf.cell(60, 10, "GRAND TOTAL", 1, 0, 'L', True)
     pdf.cell(40, 10, format_rupiah(sum_grand), 1, 1, 'R', True)
     
-    # TANDA TANGAN
     if pdf.get_y() > 160: pdf.add_page()
     pdf.ln(15)
     pdf.set_font("Arial", size=10)
@@ -142,12 +127,9 @@ menu = st.sidebar.radio("Navigasi", ["🏠 Upload Data Excel", "💰 Buat Tagiha
 if menu == "🏠 Upload Data Excel":
     st.title("📥 Upload & Sinkronisasi")
     st.markdown("""
-    **Logika Baru:**
-    1. Jika kolom `Sebelum th 2026` **ADA ISINYA** (>0) → **Pinjaman Lama**.
-    2. Jika `Sebelum th 2026` **KOSONG/0**:
-       - Cek Tanggal Pinjam.
-       - Jika Tahun **< 2026** → **LUNAS** (Saldo 0).
-       - Jika Tahun **>= 2026** → **BARU** (Saldo = Plafon).
+    **Fitur Pintar:**
+    1. Otomatis menghapus duplikat nama di data anggota.
+    2. Memisahkan Pinjaman Lama (Lunas) dan Pinjaman Baru (Top Up) berdasarkan Tahun.
     """)
     
     uploaded_file = st.file_uploader("Upload Excel (.xlsx)", type=['xlsx'])
@@ -157,29 +139,35 @@ if menu == "🏠 Upload Data Excel":
             df = pd.read_excel(uploaded_file)
             df.columns = [c.strip() for c in df.columns]
             
-            if st.button("🚀 PROSES & PERBAIKI DATA"):
-                # 1. UPDATE ANGGOTA (DEDUP BY NAMA AGAR TIDAK DOUBLE)
-                anggota_batch = []
-                seen_nama = set() # Pakai Set untuk cegah nama ganda
+            if st.button("🚀 PROSES DATA"):
+                # ========================================================
+                # 1. UPDATE TABEL ANGGOTA (DENGAN PENYARING DUPLIKAT)
+                # ========================================================
+                
+                # Kita pakai Dictionary agar No Anggota jadi KUNCI UNIK
+                # Jika No. 4 muncul 2x, yang kedua akan menimpa yg pertama (Jadi tetap 1 data)
+                anggota_unique_dict = {}
                 
                 for _, row in df.iterrows():
                     nm = str(row.get('Nama', 'Tanpa Nama')).strip()
                     no = str(row.get('No. Anggota', '-')).strip()
                     
-                    # Kunci Unik: Nama (dikecilkan biar gak sensitif huruf besar/kecil)
-                    kunci_unik = nm.lower()
-                    
-                    if kunci_unik not in seen_nama and nm != 'nan' and nm != 'Tanpa Nama':
-                        anggota_batch.append({"no_anggota": no, "nama": nm})
-                        seen_nama.add(kunci_unik)
+                    if no not in ['-', '', 'nan']:
+                        anggota_unique_dict[no] = {"no_anggota": no, "nama": nm}
                 
-                # Reset Tabel Anggota
+                # Ubah dictionary kembali jadi list untuk diinsert
+                anggota_batch = list(anggota_unique_dict.values())
+                
+                # Hapus data lama dan insert yang baru (yang sudah bersih dari duplikat)
                 supabase.table("anggota").delete().neq("id", 0).execute()
                 if anggota_batch:
+                    # Insert per 100 data
                     for i in range(0, len(anggota_batch), 100):
                         supabase.table("anggota").insert(anggota_batch[i:i+100]).execute()
                 
-                # 2. UPDATE PINJAMAN (LOGIKA TAHUN)
+                # ========================================================
+                # 2. UPDATE TABEL PINJAMAN (SEMUA DATA MASUK)
+                # ========================================================
                 supabase.table("rekap_final").delete().neq("id", 0).execute()
                 pinjaman_batch = []
                 bln_list = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des']
@@ -202,23 +190,19 @@ if menu == "🏠 Upload Data Excel":
                         plafon = bersihkan_angka(get_val(row, ['Plafon']))
                         val_sebelum = bersihkan_angka(get_val(row, ['Sebelum th 2026', 'Sebelum']))
                         
-                        # Ambil Tanggal & Tahun
                         raw_tgl = row.get('Tanggal Pinjaman', '-')
                         tgl_str, tahun_pinjam = proses_tanggal(raw_tgl)
                         
-                        # --- LOGIKA SAKTI (REVISI) ---
+                        # LOGIKA SALDO (TAHUN)
                         if val_sebelum > 0:
-                            # Case 1: Ada sisa lama -> Pakai angka itu
                             saldo = val_sebelum
                         else:
-                            # Case 2: Sisa 0 / Kosong. Cek Tahun!
+                            # Jika Saldo 0/Kosong, Cek Tahun
                             if tahun_pinjam >= 2026:
-                                saldo = plafon  # Pinjaman Baru
+                                saldo = plafon  # Baru
                             else:
-                                saldo = 0       # Pinjaman Lama yg sudah Lunas
-                        # -----------------------------
+                                saldo = 0       # Lunas
                         
-                        # Hitung Bayar
                         bayar = 0; cnt = 0
                         for b in bln_list:
                             v = bersihkan_angka(get_val(row, [b]))
@@ -233,7 +217,7 @@ if menu == "🏠 Upload Data Excel":
                             "no_anggota": str(row.get('No. Anggota', '-')),
                             "nama": str(row.get('Nama', 'Tanpa Nama')),
                             "plafon": plafon,
-                            "tanggal_pinjam": tgl_str, # Simpan string tanggal yg rapi
+                            "tanggal_pinjam": tgl_str,
                             "saldo_awal_tahun": saldo,
                             "total_angsuran_tahun_ini": bayar,
                             "sisa_akhir": sisa,
@@ -246,7 +230,8 @@ if menu == "🏠 Upload Data Excel":
                     for i in range(0, len(pinjaman_batch), 100):
                         supabase.table("rekap_final").insert(pinjaman_batch[i:i+100]).execute()
                 
-                st.success("✅ BERHASIL! Data Ganda Hilang & Pinjaman Lama (Lunas) tidak akan muncul lagi.")
+                st.success("✅ SUKSES! Data Anggota Ganda sudah dibersihkan otomatis.")
+                st.balloons()
                 
         except Exception as e: st.error(f"Error: {e}")
 
@@ -254,11 +239,10 @@ if menu == "🏠 Upload Data Excel":
 elif menu == "💰 Buat Tagihan (Pisah)":
     st.title("💰 Rekap Tagihan Bulanan")
     
-    # Ambil Data
     res_agg = supabase.table("anggota").select("*").order("nama").execute()
     list_agg = res_agg.data if res_agg.data else []
     
-    # Ambil Pinjaman yg SISA > 100 perak (Otomatis memfilter yg Lunas)
+    # Ambil Pinjaman AKTIF saja (Sisa > 100)
     res_pinj = supabase.table("rekap_final").select("*").gt("sisa_akhir", 100).execute()
     dict_pinj = { item['nama'].strip().lower(): item for item in res_pinj.data } if res_pinj.data else {}
     
@@ -275,7 +259,6 @@ elif menu == "💰 Buat Tagihan (Pisah)":
             jasa = 0
             metode = 'KANTOR'
             
-            # Cek apakah dia punya pinjaman AKTIF
             if key in dict_pinj:
                 pinj = dict_pinj[key]
                 pokok = pinj['plafon'] / 10
@@ -298,11 +281,9 @@ elif menu == "💰 Buat Tagihan (Pisah)":
         tab1, tab2 = st.tabs(["🏢 Tagihan KANTOR", "👤 Tagihan MANDIRI"])
         
         with tab1:
-            st.subheader("📋 Daftar Potong Gaji (Diserahkan ke Bendahara)")
+            st.subheader("📋 Daftar Potong Gaji")
             if data_kantor:
                 df1 = pd.DataFrame(data_kantor)
-                
-                # Preview Total
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Total Wajib", format_rupiah(df1['wajib'].sum()))
                 c2.metric("Total Pinjaman", format_rupiah(df1['pokok'].sum() + df1['jasa'].sum()))
@@ -336,7 +317,7 @@ elif menu == "🔍 Cek Per Orang":
                 st.markdown(f"""
                 <div style="border:1px solid #ddd; padding:15px; border-radius:10px; color:black;">
                     <div style="display:flex; justify-content:space-between;">
-                        <h4>{item['nama']}</h4>
+                        <h4>{item['nama']} ({item['no_anggota']})</h4>
                         <span style="background:{bg}; color:white; padding:2px 8px; border-radius:4px;">BAYAR: {jenis}</span>
                     </div>
                     <p>Sisa Pinjaman: <b>{format_rupiah(item['sisa_akhir'])}</b></p>
