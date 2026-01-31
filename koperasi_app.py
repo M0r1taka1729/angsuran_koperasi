@@ -5,7 +5,7 @@ from fpdf import FPDF
 from datetime import datetime, timedelta
 
 # ==========================================
-# 1. KONEKSI & FUNGSI
+# 1. KONEKSI & FUNGSI BANTUAN
 # ==========================================
 st.set_page_config(page_title="Sistem Koperasi", page_icon="🏦", layout="wide")
 
@@ -14,7 +14,7 @@ try:
     KEY = st.secrets["SUPABASE_KEY"]
     supabase = create_client(URL, KEY)
 except:
-    st.error("⚠️ Koneksi Database Gagal.")
+    st.error("⚠️ Koneksi Database Gagal. Cek file .streamlit/secrets.toml")
     st.stop()
 
 def format_rupiah(angka):
@@ -22,7 +22,7 @@ def format_rupiah(angka):
     return f"Rp {angka:,.0f}".replace(",", ".")
 
 def bersihkan_angka(nilai):
-    if pd.isna(nilai) or str(nilai).strip() in ['', '-', 'nan']: return 0
+    if pd.isna(nilai) or str(nilai).strip() in ['', '-', 'nan', 'Nan', '#N/A']: return 0
     if isinstance(nilai, (int, float)): return float(nilai)
     str_val = str(nilai).replace('Rp', '').replace('.', '').replace(' ', '').replace(',', '.')
     try: return float(str_val)
@@ -37,10 +37,10 @@ def perbaiki_tanggal(nilai):
     except: return str(nilai)
 
 # ==========================================
-# 2. PDF GENERATOR (PERBAIKAN TANDA TANGAN)
+# 2. PDF GENERATOR (REVISI TOTAL RINCIAN)
 # ==========================================
 def buat_pdf_tagihan(df, judul_laporan):
-    # A4 Landscape: Lebar 297mm, Tinggi 210mm
+    # A4 Landscape
     pdf = FPDF(orientation='L', unit='mm', format='A4')
     pdf.add_page()
     
@@ -70,9 +70,18 @@ def buat_pdf_tagihan(df, judul_laporan):
     # --- ISI TABEL ---
     pdf.set_font("Arial", size=9)
     no = 1
-    total_all = 0
+    
+    # Variabel Penampung Total
+    sum_wajib = 0
+    sum_pinjaman = 0 # Pokok + Jasa
+    sum_grand = 0
     
     for _, row in df.iterrows():
+        # Hitung Total
+        sum_wajib += row['wajib']
+        sum_pinjaman += (row['pokok'] + row['jasa'])
+        sum_grand += row['total_bayar']
+        
         pdf.cell(w_no, 8, str(no), 1, 0, 'C')
         pdf.cell(w_nama, 8, str(row['nama'])[:30], 1, 0, 'L')
         pdf.cell(w_wajib, 8, format_rupiah(row['wajib']), 1, 0, 'R')
@@ -83,35 +92,38 @@ def buat_pdf_tagihan(df, judul_laporan):
         pdf.cell(w_total, 8, format_rupiah(row['total_bayar']), 1, 1, 'R')
         pdf.set_font("Arial", size=9)
         
-        total_all += row['total_bayar']
         no += 1
         
-    # --- FOOTER TOTAL ---
-    pdf.ln(2)
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(w_no+w_nama+w_wajib+w_pokok+w_jasa, 12, "TOTAL:", 1, 0, 'R')
-    pdf.set_fill_color(255, 255, 0)
-    pdf.cell(w_total, 12, format_rupiah(total_all), 1, 1, 'R', True)
+    # --- FOOTER TOTAL RINCIAN (REVISI DISINI) ---
+    pdf.ln(5)
     
-    # --- LOGIKA TANDA TANGAN MENYATU ---
-    # Tinggi A4 Landscape = 210mm. Batas aman bawah sekitar 190mm.
-    # Kita butuh sekitar 40mm space untuk tanda tangan.
-    # Jika posisi cursor (get_y) sudah di atas 160, paksa pindah halaman.
+    # Cek tempat cukup gak?
+    if pdf.get_y() > 150: pdf.add_page()
     
-    if pdf.get_y() > 160:
-        pdf.add_page()
+    # Kita buat kotak rekap di sebelah kanan
+    pdf.set_x(180) # Geser ke kanan
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(60, 8, "Total Simpanan Wajib", 1, 0, 'L')
+    pdf.cell(40, 8, format_rupiah(sum_wajib), 1, 1, 'R')
     
-    pdf.ln(15) # Jarak dari tabel
+    pdf.set_x(180)
+    pdf.cell(60, 8, "Total Angsuran + Jasa", 1, 0, 'L')
+    pdf.cell(40, 8, format_rupiah(sum_pinjaman), 1, 1, 'R')
+    
+    pdf.set_x(180)
+    pdf.set_font("Arial", 'B', 11)
+    pdf.set_fill_color(255, 255, 0) # Kuning
+    pdf.cell(60, 10, "GRAND TOTAL SETORAN", 1, 0, 'L', True)
+    pdf.cell(40, 10, format_rupiah(sum_grand), 1, 1, 'R', True)
+    
+    # --- TANDA TANGAN ---
+    if pdf.get_y() > 160: pdf.add_page()
+    
+    pdf.ln(15)
     pdf.set_font("Arial", size=10)
-    
-    # Posisi Tanggal (Kanan)
-    # 200 adalah indentasi dari kiri (Agar teks ada di sebelah kanan kertas)
-    pdf.cell(200) 
+    pdf.cell(200)
     pdf.cell(70, 6, f"Bengkulu, {datetime.now().strftime('%d-%m-%Y')}", 0, 1, 'C')
-    
-    pdf.ln(20) # Jarak untuk tanda tangan
-    
-    # Posisi Nama Bendahara (Kanan)
+    pdf.ln(20)
     pdf.cell(200)
     pdf.cell(70, 6, "( Bendahara )", 0, 1, 'C')
 
@@ -161,13 +173,12 @@ if menu == "🏠 Upload Data Excel":
                             if x.lower() == c.lower(): return r[c]
                     return 0
                 
-                # Cari kolom metode bayar
                 def get_metode(r):
                     for c in df.columns:
                         if c.lower() in ['metode bayar', 'keterangan', 'cara bayar']:
                             val = str(r[c]).lower()
                             if 'sendiri' in val or 'tunai' in val: return 'SENDIRI'
-                    return 'KANTOR' # Default
+                    return 'KANTOR'
 
                 for _, row in df.iterrows():
                     try:
@@ -185,7 +196,6 @@ if menu == "🏠 Upload Data Excel":
                         sisa = saldo - bayar
                         if sisa < 0: sisa = 0
                         
-                        # DETEKSI CARA BAYAR
                         jenis = get_metode(row)
                         
                         pinjaman_batch.append({
@@ -197,7 +207,7 @@ if menu == "🏠 Upload Data Excel":
                             "total_angsuran_tahun_ini": bayar,
                             "sisa_akhir": sisa,
                             "bulan_berjalan": cnt,
-                            "jenis_bayar": jenis # Kolom Baru
+                            "jenis_bayar": jenis
                         })
                     except: pass
                 
@@ -205,15 +215,14 @@ if menu == "🏠 Upload Data Excel":
                     for i in range(0, len(pinjaman_batch), 100):
                         supabase.table("rekap_final").insert(pinjaman_batch[i:i+100]).execute()
                 
-                st.success("✅ Data Berhasil Diupdate! Sistem sudah memisahkan 'Kantor' vs 'Sendiri'.")
+                st.success("✅ Data Berhasil Diupdate!")
                 
         except Exception as e: st.error(f"Error: {e}")
 
-# --- MENU TAGIHAN (PISAH TAB) ---
+# --- MENU TAGIHAN ---
 elif menu == "💰 Buat Tagihan (Pisah)":
     st.title("💰 Rekap Tagihan Bulanan")
     
-    # Ambil Data
     res_agg = supabase.table("anggota").select("*").order("nama").execute()
     list_agg = res_agg.data if res_agg.data else []
     
@@ -231,7 +240,7 @@ elif menu == "💰 Buat Tagihan (Pisah)":
             wajib = 150000
             pokok = 0
             jasa = 0
-            metode = 'KANTOR' # Default kalau tidak punya hutang, dianggap kantor (potong gaji untuk wajib)
+            metode = 'KANTOR'
             
             if key in dict_pinj:
                 pinj = dict_pinj[key]
@@ -252,20 +261,29 @@ elif menu == "💰 Buat Tagihan (Pisah)":
             else:
                 data_kantor.append(item)
         
-        # TAMPILAN TAB
         tab1, tab2 = st.tabs(["🏢 Tagihan ke KANTOR", "👤 Tagihan SETOR SENDIRI"])
         
         with tab1:
-            st.subheader("📋 Daftar Potong Gaji (Diserahkan ke Bendahara)")
+            st.subheader("📋 Daftar Potong Gaji")
             if data_kantor:
                 df1 = pd.DataFrame(data_kantor)
+                
+                # Hitung Total untuk Preview di Layar
+                tot_wajib = df1['wajib'].sum()
+                tot_pinj = df1['pokok'].sum() + df1['jasa'].sum()
+                tot_all = df1['total_bayar'].sum()
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Wajib", format_rupiah(tot_wajib))
+                col2.metric("Total Pinjaman", format_rupiah(tot_pinj))
+                col3.metric("Grand Total", format_rupiah(tot_all))
+                
                 st.dataframe(df1.style.format({"wajib":"Rp {:,.0f}", "pokok":"Rp {:,.0f}", "jasa":"Rp {:,.0f}", "total_bayar":"Rp {:,.0f}"}))
-                st.download_button("🖨️ Download PDF (Untuk Kantor)", buat_pdf_tagihan(df1, "DAFTAR POTONGAN GAJI PEGAWAI"), "Tagihan_Kantor.pdf", "application/pdf", type="primary")
+                st.download_button("🖨️ Download PDF (Lengkap)", buat_pdf_tagihan(df1, "DAFTAR POTONGAN GAJI PEGAWAI"), "Tagihan_Kantor.pdf", "application/pdf", type="primary")
             else: st.info("Tidak ada data tagihan kantor.")
             
         with tab2:
-            st.subheader("📋 Daftar Penagihan Manual (Pegangan Ibu)")
-            st.warning("Anggota ini TIDAK dimasukkan ke laporan kantor. Ibu harus menagih sendiri.")
+            st.subheader("📋 Daftar Penagihan Manual")
             if data_sendiri:
                 df2 = pd.DataFrame(data_sendiri)
                 st.dataframe(df2.style.format({"wajib":"Rp {:,.0f}", "pokok":"Rp {:,.0f}", "jasa":"Rp {:,.0f}", "total_bayar":"Rp {:,.0f}"}))
@@ -283,13 +301,13 @@ elif menu == "🔍 Cek Per Orang":
             for item in res.data:
                 pokok = item['plafon'] / 10; jasa = item['plafon'] * 0.01; total = pokok + jasa + 150000
                 jenis = item.get('jenis_bayar', 'KANTOR')
-                badge_color = "orange" if jenis == 'SENDIRI' else "blue"
+                bg = "orange" if jenis == 'SENDIRI' else "blue"
                 
                 st.markdown(f"""
                 <div style="border:1px solid #ddd; padding:15px; border-radius:10px; color:black;">
                     <div style="display:flex; justify-content:space-between;">
                         <h4>{item['nama']}</h4>
-                        <span style="background:{badge_color}; color:white; padding:2px 8px; border-radius:4px;">BAYAR: {jenis}</span>
+                        <span style="background:{bg}; color:white; padding:2px 8px; border-radius:4px;">BAYAR: {jenis}</span>
                     </div>
                     <p>Sisa Pinjaman: <b>{format_rupiah(item['sisa_akhir'])}</b></p>
                     <hr>
