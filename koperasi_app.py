@@ -28,23 +28,35 @@ def bersihkan_angka(nilai):
     try: return float(str_val)
     except: return 0
 
-def perbaiki_tanggal(nilai):
-    if pd.isna(nilai) or str(nilai).strip() in ['', '-']: return "-"
+# FUNGSI PARSE TANGGAL & TAHUN (Sangat Penting!)
+def proses_tanggal(nilai):
+    # Return: (String Tanggal, Tahun Integer)
+    default_res = ("-", 0)
+    
+    if pd.isna(nilai) or str(nilai).strip() in ['', '-', 'nan']: 
+        return default_res
+        
     try:
+        # 1. Cek format Angka Excel (Serial)
         if isinstance(nilai, (int, float)) or (isinstance(nilai, str) and nilai.isdigit()):
-            return (datetime(1899, 12, 30) + timedelta(days=float(nilai))).strftime("%d-%m-%Y")
-        return pd.to_datetime(nilai).strftime("%d-%m-%Y")
-    except: return str(nilai)
+            py_date = datetime(1899, 12, 30) + timedelta(days=float(nilai))
+            return py_date.strftime("%d-%m-%Y"), py_date.year
+            
+        # 2. Cek format String Standar
+        py_date = pd.to_datetime(nilai)
+        return py_date.strftime("%d-%m-%Y"), py_date.year
+        
+    except:
+        return str(nilai), 0 # Gagal parsing
 
 # ==========================================
-# 2. PDF GENERATOR (REVISI TOTAL RINCIAN)
+# 2. PDF GENERATOR
 # ==========================================
 def buat_pdf_tagihan(df, judul_laporan):
-    # A4 Landscape
     pdf = FPDF(orientation='L', unit='mm', format='A4')
     pdf.add_page()
     
-    # --- KOP SURAT ---
+    # KOP
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(0, 10, "KOPERASI SIMPAN PINJAM", ln=True, align='C')
     pdf.set_font("Arial", size=12)
@@ -54,7 +66,7 @@ def buat_pdf_tagihan(df, judul_laporan):
     pdf.line(10, 35, 285, 35)
     pdf.ln(10)
     
-    # --- HEADER TABEL ---
+    # HEADER
     pdf.set_font("Arial", 'B', 9)
     pdf.set_fill_color(220, 230, 240)
     
@@ -67,17 +79,12 @@ def buat_pdf_tagihan(df, judul_laporan):
     pdf.cell(w_jasa, 10, "Jasa (1%)", 1, 0, 'C', True)
     pdf.cell(w_total, 10, "TOTAL TAGIHAN", 1, 1, 'C', True)
     
-    # --- ISI TABEL ---
+    # ISI
     pdf.set_font("Arial", size=9)
     no = 1
-    
-    # Variabel Penampung Total
-    sum_wajib = 0
-    sum_pinjaman = 0 # Pokok + Jasa
-    sum_grand = 0
+    sum_wajib = 0; sum_pinjaman = 0; sum_grand = 0
     
     for _, row in df.iterrows():
-        # Hitung Total
         sum_wajib += row['wajib']
         sum_pinjaman += (row['pokok'] + row['jasa'])
         sum_grand += row['total_bayar']
@@ -94,14 +101,12 @@ def buat_pdf_tagihan(df, judul_laporan):
         
         no += 1
         
-    # --- FOOTER TOTAL RINCIAN (REVISI DISINI) ---
+    # FOOTER TOTAL
     pdf.ln(5)
-    
-    # Cek tempat cukup gak?
     if pdf.get_y() > 150: pdf.add_page()
     
-    # Kita buat kotak rekap di sebelah kanan
-    pdf.set_x(180) # Geser ke kanan
+    # Kotak Rekap Kanan
+    pdf.set_x(180)
     pdf.set_font("Arial", '', 10)
     pdf.cell(60, 8, "Total Simpanan Wajib", 1, 0, 'L')
     pdf.cell(40, 8, format_rupiah(sum_wajib), 1, 1, 'R')
@@ -112,13 +117,12 @@ def buat_pdf_tagihan(df, judul_laporan):
     
     pdf.set_x(180)
     pdf.set_font("Arial", 'B', 11)
-    pdf.set_fill_color(255, 255, 0) # Kuning
-    pdf.cell(60, 10, "GRAND TOTAL SETORAN", 1, 0, 'L', True)
+    pdf.set_fill_color(255, 255, 0)
+    pdf.cell(60, 10, "GRAND TOTAL", 1, 0, 'L', True)
     pdf.cell(40, 10, format_rupiah(sum_grand), 1, 1, 'R', True)
     
-    # --- TANDA TANGAN ---
+    # TANDA TANGAN
     if pdf.get_y() > 160: pdf.add_page()
-    
     pdf.ln(15)
     pdf.set_font("Arial", size=10)
     pdf.cell(200)
@@ -137,7 +141,14 @@ menu = st.sidebar.radio("Navigasi", ["🏠 Upload Data Excel", "💰 Buat Tagiha
 # --- MENU UPLOAD ---
 if menu == "🏠 Upload Data Excel":
     st.title("📥 Upload & Sinkronisasi")
-    st.info("Tips: Tambahkan kolom 'Metode Bayar' di Excel. Isi dengan 'Sendiri' jika anggota bayar tunai.")
+    st.markdown("""
+    **Logika Baru:**
+    1. Jika kolom `Sebelum th 2026` **ADA ISINYA** (>0) → **Pinjaman Lama**.
+    2. Jika `Sebelum th 2026` **KOSONG/0**:
+       - Cek Tanggal Pinjam.
+       - Jika Tahun **< 2026** → **LUNAS** (Saldo 0).
+       - Jika Tahun **>= 2026** → **BARU** (Saldo = Plafon).
+    """)
     
     uploaded_file = st.file_uploader("Upload Excel (.xlsx)", type=['xlsx'])
     
@@ -146,23 +157,29 @@ if menu == "🏠 Upload Data Excel":
             df = pd.read_excel(uploaded_file)
             df.columns = [c.strip() for c in df.columns]
             
-            if st.button("🚀 PROSES DATA"):
-                # 1. UPDATE ANGGOTA
+            if st.button("🚀 PROSES & PERBAIKI DATA"):
+                # 1. UPDATE ANGGOTA (DEDUP BY NAMA AGAR TIDAK DOUBLE)
                 anggota_batch = []
-                seen = set()
+                seen_nama = set() # Pakai Set untuk cegah nama ganda
+                
                 for _, row in df.iterrows():
                     nm = str(row.get('Nama', 'Tanpa Nama')).strip()
                     no = str(row.get('No. Anggota', '-')).strip()
-                    if f"{no}-{nm}" not in seen and nm != 'nan':
+                    
+                    # Kunci Unik: Nama (dikecilkan biar gak sensitif huruf besar/kecil)
+                    kunci_unik = nm.lower()
+                    
+                    if kunci_unik not in seen_nama and nm != 'nan' and nm != 'Tanpa Nama':
                         anggota_batch.append({"no_anggota": no, "nama": nm})
-                        seen.add(f"{no}-{nm}")
+                        seen_nama.add(kunci_unik)
                 
+                # Reset Tabel Anggota
                 supabase.table("anggota").delete().neq("id", 0).execute()
                 if anggota_batch:
                     for i in range(0, len(anggota_batch), 100):
                         supabase.table("anggota").insert(anggota_batch[i:i+100]).execute()
                 
-                # 2. UPDATE PINJAMAN
+                # 2. UPDATE PINJAMAN (LOGIKA TAHUN)
                 supabase.table("rekap_final").delete().neq("id", 0).execute()
                 pinjaman_batch = []
                 bln_list = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des']
@@ -185,9 +202,23 @@ if menu == "🏠 Upload Data Excel":
                         plafon = bersihkan_angka(get_val(row, ['Plafon']))
                         val_sebelum = bersihkan_angka(get_val(row, ['Sebelum th 2026', 'Sebelum']))
                         
-                        if val_sebelum > 0: saldo = val_sebelum
-                        else: saldo = plafon
+                        # Ambil Tanggal & Tahun
+                        raw_tgl = row.get('Tanggal Pinjaman', '-')
+                        tgl_str, tahun_pinjam = proses_tanggal(raw_tgl)
                         
+                        # --- LOGIKA SAKTI (REVISI) ---
+                        if val_sebelum > 0:
+                            # Case 1: Ada sisa lama -> Pakai angka itu
+                            saldo = val_sebelum
+                        else:
+                            # Case 2: Sisa 0 / Kosong. Cek Tahun!
+                            if tahun_pinjam >= 2026:
+                                saldo = plafon  # Pinjaman Baru
+                            else:
+                                saldo = 0       # Pinjaman Lama yg sudah Lunas
+                        # -----------------------------
+                        
+                        # Hitung Bayar
                         bayar = 0; cnt = 0
                         for b in bln_list:
                             v = bersihkan_angka(get_val(row, [b]))
@@ -202,7 +233,7 @@ if menu == "🏠 Upload Data Excel":
                             "no_anggota": str(row.get('No. Anggota', '-')),
                             "nama": str(row.get('Nama', 'Tanpa Nama')),
                             "plafon": plafon,
-                            "tanggal_pinjam": perbaiki_tanggal(row.get('Tanggal Pinjaman', '-')),
+                            "tanggal_pinjam": tgl_str, # Simpan string tanggal yg rapi
                             "saldo_awal_tahun": saldo,
                             "total_angsuran_tahun_ini": bayar,
                             "sisa_akhir": sisa,
@@ -215,7 +246,7 @@ if menu == "🏠 Upload Data Excel":
                     for i in range(0, len(pinjaman_batch), 100):
                         supabase.table("rekap_final").insert(pinjaman_batch[i:i+100]).execute()
                 
-                st.success("✅ Data Berhasil Diupdate!")
+                st.success("✅ BERHASIL! Data Ganda Hilang & Pinjaman Lama (Lunas) tidak akan muncul lagi.")
                 
         except Exception as e: st.error(f"Error: {e}")
 
@@ -223,10 +254,12 @@ if menu == "🏠 Upload Data Excel":
 elif menu == "💰 Buat Tagihan (Pisah)":
     st.title("💰 Rekap Tagihan Bulanan")
     
+    # Ambil Data
     res_agg = supabase.table("anggota").select("*").order("nama").execute()
     list_agg = res_agg.data if res_agg.data else []
     
-    res_pinj = supabase.table("rekap_final").select("*").gt("sisa_akhir", 0).execute()
+    # Ambil Pinjaman yg SISA > 100 perak (Otomatis memfilter yg Lunas)
+    res_pinj = supabase.table("rekap_final").select("*").gt("sisa_akhir", 100).execute()
     dict_pinj = { item['nama'].strip().lower(): item for item in res_pinj.data } if res_pinj.data else {}
     
     if list_agg:
@@ -242,6 +275,7 @@ elif menu == "💰 Buat Tagihan (Pisah)":
             jasa = 0
             metode = 'KANTOR'
             
+            # Cek apakah dia punya pinjaman AKTIF
             if key in dict_pinj:
                 pinj = dict_pinj[key]
                 pokok = pinj['plafon'] / 10
@@ -261,34 +295,30 @@ elif menu == "💰 Buat Tagihan (Pisah)":
             else:
                 data_kantor.append(item)
         
-        tab1, tab2 = st.tabs(["🏢 Tagihan ke KANTOR", "👤 Tagihan SETOR SENDIRI"])
+        tab1, tab2 = st.tabs(["🏢 Tagihan KANTOR", "👤 Tagihan MANDIRI"])
         
         with tab1:
-            st.subheader("📋 Daftar Potong Gaji")
+            st.subheader("📋 Daftar Potong Gaji (Diserahkan ke Bendahara)")
             if data_kantor:
                 df1 = pd.DataFrame(data_kantor)
                 
-                # Hitung Total untuk Preview di Layar
-                tot_wajib = df1['wajib'].sum()
-                tot_pinj = df1['pokok'].sum() + df1['jasa'].sum()
-                tot_all = df1['total_bayar'].sum()
-                
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Total Wajib", format_rupiah(tot_wajib))
-                col2.metric("Total Pinjaman", format_rupiah(tot_pinj))
-                col3.metric("Grand Total", format_rupiah(tot_all))
+                # Preview Total
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total Wajib", format_rupiah(df1['wajib'].sum()))
+                c2.metric("Total Pinjaman", format_rupiah(df1['pokok'].sum() + df1['jasa'].sum()))
+                c3.metric("Grand Total", format_rupiah(df1['total_bayar'].sum()))
                 
                 st.dataframe(df1.style.format({"wajib":"Rp {:,.0f}", "pokok":"Rp {:,.0f}", "jasa":"Rp {:,.0f}", "total_bayar":"Rp {:,.0f}"}))
-                st.download_button("🖨️ Download PDF (Lengkap)", buat_pdf_tagihan(df1, "DAFTAR POTONGAN GAJI PEGAWAI"), "Tagihan_Kantor.pdf", "application/pdf", type="primary")
-            else: st.info("Tidak ada data tagihan kantor.")
+                st.download_button("🖨️ Download PDF", buat_pdf_tagihan(df1, "DAFTAR POTONGAN GAJI PEGAWAI"), "Tagihan_Kantor.pdf", "application/pdf", type="primary")
+            else: st.info("Tidak ada data.")
             
         with tab2:
             st.subheader("📋 Daftar Penagihan Manual")
             if data_sendiri:
                 df2 = pd.DataFrame(data_sendiri)
                 st.dataframe(df2.style.format({"wajib":"Rp {:,.0f}", "pokok":"Rp {:,.0f}", "jasa":"Rp {:,.0f}", "total_bayar":"Rp {:,.0f}"}))
-                st.download_button("🖨️ Download PDF (Manual)", buat_pdf_tagihan(df2, "DAFTAR TAGIHAN SETOR MANDIRI"), "Tagihan_Mandiri.pdf", "application/pdf")
-            else: st.info("Tidak ada anggota yang setor sendiri.")
+                st.download_button("🖨️ Download PDF", buat_pdf_tagihan(df2, "DAFTAR TAGIHAN SETOR MANDIRI"), "Tagihan_Mandiri.pdf", "application/pdf")
+            else: st.info("Tidak ada data.")
             
     else: st.warning("Data kosong.")
 
