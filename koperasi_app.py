@@ -40,7 +40,7 @@ def perbaiki_tanggal(nilai):
 # 2. PDF GENERATOR
 # ==========================================
 def buat_pdf_tagihan(df, judul_laporan):
-    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf = FPDF(orientation='L', unit='mm', format='A4')
     pdf.add_page()
     
     # KOP
